@@ -1,0 +1,126 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# ##############################################################################
+# Playbook pour automatiser l'installation des serveurs web d'Ecampus
+# ##############################################################################
+#
+# En plus de ce playbook, il ne faudra pas oublier les actions qui ne sont pas intégrables dans un playbook, telles que :
+#
+# * demander au groupe Application à la DSI d'ouvrir les accès au référentiel pour l'adresse IP de chacun des serveurs
+# * demander au groupe Système à la DSI d'ouvrir les accès aux serveurs NFS, objet d'un montage (voir les inventaires) pour l'adresse IP de chacun des serveurs
+#
+# # Utilisation
+#
+# Le groupe de hosts est précisé à travers l'option '-l'
+# (voir fichier d'inventaire pour les noms de groupes ou de hosts possibles)
+#
+# Exemple d'usage'
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l lprelude-pp \
+  # <options pour vault...> \
+  # playbooks/deploiement_serveurs_web.yml
+#
+# Eventuellement ajoute de une ou plusieurs variables pour neutraliser une partie des taches
+# sous la forme
+  # --extra-vars '{"variables1":true, "variables2":true, etc}'
+# Le playbook test uniquement si ces variables sont définies,
+# donc NE PAS LES DEFINIR si elle ne sont pas nécessaires, plutôt que les définir à `false`.
+#
+# Les variables disponibles :
+# * "skip_dataroot_permission_correction":true, pour ne pas corriger les éventuelles anomalies
+#     de droits d'accès aux fichiers dans le dataroot.
+#     Cela suppose que l'on privilégie le risque d'avoir des fichiers inaccessibles
+#     dans le dataroot à celui d'avoir une opération de déploiement trop longue.
+#
+
+- name: Configuration proxies
+  hosts: serveurs_web
+  roles:
+    - role: roles/proxy
+
+- name: Verification des montages
+  hosts: serveurs_web
+  roles:
+    - role: roles/montages
+      when: montages is defined
+
+- name: Installation des paquets communs
+  # Gathering facts est indispensable pour ce play (pour lecture ansible_distribution), ne jamais le désactiver.
+  hosts: serveurs_web
+  roles:
+    - role: roles/commun
+
+- name: Installation de Git
+  hosts: serveurs_web
+  roles:
+    - role: roles/install_git
+
+- name: Installation de Apache
+  hosts: serveurs_web
+  roles:
+    - role: roles/apache/install_apache
+    - role: roles/apache/www_folder
+    - role: roles/apache/configure_http
+    - role: roles/apache/configure_https
+    - role: roles/apache/activate_apache_status
+      vars:
+        status_apache: true # pour activer les pages de status apache2
+
+- name: Installation de php
+  hosts: serveurs_web
+  vars:
+    server_limit:	# Nombre de processus apache max.
+    max_request_workers:	 # Nombre de thread apache max.
+    pm_max_children:  # Nombre de processus php max.
+  roles:
+    - role: roles/php/install_php
+    - role: roles/php/install_fpm # php-fpm
+    - role: roles/php/activate_fpm_status # status de php-fpm
+      vars:
+        status_fpm: true
+    - role: roles/php/install_oci8 #extensions Oracle de php
+      vars:
+        instantclient_version: x.x.x.x
+        oci8_version: x.x.x
+      when: (plateforme == 'ecampus') or (plateforme == 'collegium')
+
+- name: Installation de moosh
+  hosts: serveurs_web
+  roles:
+    - role: roles/php/install_composer
+    - role: roles/moodle/install_moosh
+
+- name: Préparation installation moodle
+  hosts: serveurs_web
+  roles:
+    - role: roles/moodle/sources/droits_dossiers
+    - role: roles/moodle/install_util
+
+# Pour le serveur de cron
+- name: configuration des crons
+  hosts: serveurs_de_cron
+  roles:
+    - role: roles/moodle/config_cron
+    - role: roles/moodle/fix_course_sequence
+
+- name: installation de lmsjonction
+  hosts: serveurs_de_cron
+  vars:
+    www_dir: "/opt"
+  roles:
+    - role: roles/moodle/install_lmsjonction
+      when: plateforme == 'ecampus'

@@ -1,0 +1,28 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: check_lmsjonction
+  ansible.builtin.command:
+    cmd: 'php {{www_dir}}/lmsjonction/{{item}}'
+  loop:
+    - test_ws.php
+    - test_REFER_db.php
+    - test_prefixeMoodle_db.php
+  register: lmsjonction_ok
+  failed_when: lmsjonction_ok.rc != 0
+  ignore_errors: true # continuer même si les tests sont en échec (résultats à titre indicatif)
+  changed_when: false # forcé car lecture seulement
+  tags:
+    - check

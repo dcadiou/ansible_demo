@@ -1,0 +1,21 @@
+/*FONT*/
+/* Polices */
+@font-face {
+        font-family: "Ubuntu";
+        font-style: normal;
+        font-weight: normal;
+	/* IE9 Compat Modes */
+        src: url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.eot");
+        src: local("Ubuntu"), local("Ubuntu-Regular"),
+	/* IE6-IE8 */
+                url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.eot?#iefix") format("embedded-opentype"),
+	/* Super Modern Browsers */
+                url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.woff2") format("woff2"),
+                /* Modern Browsers */
+                url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.woff") format("woff"),
+                /* Safari, Android, iOS */
+                url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.ttf") format("truetype"),
+                /* Legacy iOS */
+                url("/pluginfile.php/1/theme_boost_union/customfonts/0/ubuntu-v14-latin-regular.svg#Ubuntu") format("svg");
+}
+...

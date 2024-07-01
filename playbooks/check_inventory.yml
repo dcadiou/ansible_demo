@@ -1,0 +1,184 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Playbook à utiliser pour controler que toutes les variables nécessaires
+# sont bien définies pour tel ou tel groupe.
+#
+# Exemple d'usage'
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l ecampus \
+  # <options pour vault...> \
+  # playbooks/check_inventory.yml
+  #
+#
+# Note :
+# - pour réaliser le test pour tel ou tel groupe modifier l'option '-l'
+# - pour réaliser le test pour tel ou tel fichier d'inventaire modifier l'option '-i'
+# - pour tester la plupart des configurations en une fois
+      # for i in prod pp dev locaux; do
+      # for l in ecampus collegium prelude; do
+      # echo;
+      # echo $i $l;
+      # ansible-playbook -i inventories/serveurs_$i.yml -l $l \
+      # <options pour vault...> \
+      # playbooks/check_inventory.yml;
+      # done;
+      # done
+#
+#
+
+
+- name: verification variables communes
+  hosts: all
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+    - name: variables communes a definir ou pas
+      ansible.builtin.debug:
+        msg: "{{ ( item, ('existe' if item is defined else 'non définie')) | join (' ') }}"
+      loop:
+        - prod # défini (pas de valeur) si le serveur est un serveur de prod
+        - container_docker # vrai pour indiquer qu'il s'agit d'un container docker (peut-être redondant avec `ansible_connection:
+
+    - name: variables communes a renseigner
+      ansible.builtin.debug:
+        msg: "{{ item }} = {{ lookup('vars', item) }}"
+      loop:
+        - montages # la liste des montages à mettre en place (renseignés comme on le ferait dans un /etc/fstab)
+            # ???: # nom à donner au montage
+            #   src: ??? # la localisation du sossier monté (sous la forme host:chemin)
+            #   path: ??? # le chemin local où le montage se fera
+            #   fstype: ??? # type de montage
+            #   opts: ??? # les options de montage (séparées par des `,`)
+
+
+- name: verification variables serveur web
+  hosts: serveurs_web
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+    # - name: variables serveur web a definir ou pas
+    #   ansible.builtin.debug:
+    #     msg: "{{ ( item, ('existe' if item is defined else 'non définie')) | join (' ') }}"
+    #   loop:
+
+    - name: variables serveur web a renseigner
+      ansible.builtin.debug:
+        msg: "{{ item }} = {{ lookup('vars', item) }}"
+      loop:
+        - www_dir # chemin vers le dossier racine du serveur web (là où chaque site web doit avoir son dossier)
+        - application # nom de l'application (sert notamment à nommer le dossier qui contiendra le site web)
+        - server_admin # adresse mail du responsable serveur
+        - domaine # nom de domaine tel qu'il apparait dans les URLs qui seront utilisées
+        - php_version # version de php, par exemple 7.4
+        # Variables qui précisent les droits pour les dossiers racine des applis web (éventuellement sous Git)
+        - appli_dir_owner # des valeurs qu'on utiliserait avec `chown`
+        - appli_dir_group # des valeurs qu'on utiliserait avec `chown`
+        - appli_dir_mode # des valeurs qu'on utiliserait avec `chmod`
+        # Variables qui précisent les droits pour les dossiers des fichiers multimédias ou parents
+        - dataroot_dir_owner
+        - dataroot_dir_group
+        - dataroot_dir_mode
+
+
+- name: verification variables moodle
+  hosts: moodle
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+    # - name: variables moodle a definir ou pas
+    #   ansible.builtin.debug:
+    #     msg: "{{ ( item, ('existe' if item is defined else 'non définie')) | join (' ') }}"
+    #   loop:
+
+    - name: variables moodle a renseigner
+      ansible.builtin.debug:
+        msg: "{{ item }} = {{ lookup('vars', item) }}"
+      loop:
+        - version_cible # la version courante du dépot source moodle
+        - plateforme # nom de la plateforme de prod associée (même nom pour dev, prod et préprod), choisir parmi
+            # ecampus
+            # collegium
+            # prelude
+        - brandcolor # couleur principale de la plateforme, exprimé sous une forme #aabbcc (en hexadecimal)
+        - moodle_dir # chemin absolu du dossier qui contient les sources Moodle
+        - dataroot_dir # chemin d'accès au dataroot
+        - moodle_sources_communes # true si plusieurs serveurs web partagent le même dossier source Moodle
+        - moodle_url # l'URL de la plateforme
+        - moodle_user # variable (cryptée dans inventories/group_vars/moodle/vault/comptes_moodle.yml)
+            # contenant les données d'authentifications admin pour Moodle.
+            # Par exemple si dans la vault, `vault_moodle_user`, est ainsi
+            # vault_moodle_user:
+            #   toto:
+            #     username: admin
+            #     pw: yyyyyyyyy
+            #
+            # Il faudra définir
+            # moodle_user: "{{vault_moodle_user['toto']}}"
+        - db_conn # variable (cryptée dans inventories/group_vars/moodle/vault/connexions_db.yml) contenant les paramètres de connexion à la BD.
+            # Par exemple si dans la vault, `vault_connexions_bd`, est ainsi
+            # vault_connexions_bd:
+            #   toto:
+            #     host: localhost
+            #     bd: mabd
+            #     user: admin
+            #     pw: xxxxxxxxxx
+            #
+            # Il faudra définir
+            # db_conn: "{{vault_connexions_bd['toto']}}"
+
+
+- name: verification variables plateforme shibbolethisee
+  hosts: shibbolethise # accessibles au travers d'une authentification de type Shibboleth
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+    # - name: variables shibbolethisee a definir ou pas
+    #   ansible.builtin.debug:
+    #     msg: "{{ ( item, ('existe' if item is defined else 'non définie')) | join (' ') }}"
+    #   loop:
+
+    - name: variables shibbolethisee a renseigner
+      ansible.builtin.debug:
+        msg: "{{ item }} = {{ lookup('vars', item) }}"
+      loop:
+        - shib_metadataprovider_uri # l'URI du fournisseur de métédonnées Shibboleth
+        - shib_metadata_cert_name # le nom du fichier qui contient le certificat du fournisseur de métadonnées (fichier .pem)
+        - shib_identityproviders # liste des fournisseurs d'identité (établissements)
+            # - entityID: ??? # l'identifiant du fournisseur d'identité
+            #   SSO: # l'URL d'accès pour le single sign on
+            #   name: # un nom qui le décrit
+            # - ... # autant d'items que de fournisseurs d'identités
+
+
+- name: verification variables serveur de bdd
+  hosts: serveurs_bd
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+    # - name: variables serveur de bdd a definir ou pas
+    #   ansible.builtin.debug:
+    #     msg: "{{ ( item, ('existe' if item is defined else 'non définie')) | join (' ') }}"
+    #   loop:
+
+    - name: variables serveur de bdd a renseigner
+      ansible.builtin.debug:
+        msg: "{{ item }} = {{ lookup('vars', item) }}"
+      loop:
+        - data_dir # chemin vers le dossier de travail mysql (généralement /var/lib/mysql)
+        - buffer_pool_size # paramètres de conf mariadb, `innodb_buffer_pool_size`, à adapter à la mémoire dispo
+        - max_connections # paramètres de conf mariadb, à adapter à l'usage (nbre de processus susceptibles de se connecter à la BD)
+        - depot_script # chemin où le dépôt des scripts, projet [moodle_admin](https://git.exemple.fr/moodle/moodle_admin/), doit être cloné
+        - backup_dir # chemin où doivent être enregistré les sauvegardes SQL automatiques
+        - bdds_name
+          # - ??? # nom de la 1ere BDD
+          # - ??? # nom de la 2eme BDD
+          # - ...

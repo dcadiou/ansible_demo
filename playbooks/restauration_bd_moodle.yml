@@ -1,0 +1,68 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# ##############################################################################
+# Playbook pour automatiser la restauration d'une BD de prod ailleus (préprod)
+# ##############################################################################
+
+# # Utilisation
+#
+# Le groupe de hosts est précisé à travers l'option '-l'
+# (voir fichier d'inventaire pour les noms de groupes ou de hosts possibles)
+#
+# ## Les arguments
+# Ce playbook doit être appelé en définissant certaines variables dans la ligne de commande.
+# Variables à définir en argument
+# * chemin_sauvegarde : le chemin d'accès au fichier de sauvegarde .sql de la BD à restaurer,
+#   tel que vu depuis la machine distante
+# * nom_bd : nom de la base de données, tel qu'elle doit s'appeler une fois restaurée
+
+# Exemple de définition des arguments, noter la partie '--extra-vars'
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l prelude-pp
+  # <options pour vault...> \
+  # playbooks/restauration_bd_moodle.yml \
+  # --extra-vars '{"chemin_sauvegarde":"toto/titi/tata", \
+  # "nom_bd":"prelude"}'
+- name: Check arguments
+  hosts: serveurs_bd
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+  - name: check Variables
+    ansible.builtin.assert:
+      that: item.valeur | length > 0
+      fail_msg: 'Ce playbook doit être appelé avec {{ item.nom }} défini dans une option --extra-vars'
+      success_msg: 'Paramètre {{ item.nom }} présent (= {{ item.valeur }} )'
+    loop:
+      - chemin_sauvegarde:
+        nom: chemin_sauvegarde
+        valeur: '{{chemin_sauvegarde}}'
+      - nom_bd:
+        nom: nom_bd
+        valeur: '{{nom_bd}}'
+  - name: la sauvegarde a la bonne extension
+    ansible.builtin.assert:
+      that: chemin_sauvegarde is search('\.sql$')
+      fail_msg: "La sauvegarde indiquée, {{chemin_sauvegarde}}, doit être décompressée (extension '.sql')"
+      success_msg: "La sauvegarde possède l'extension attendue ('.sql')"
+
+- name: Synchronisation de Moodle avec la prod
+  hosts: serveurs_bd
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  roles:
+    - role: roles/moodle/bd/restauration
+      when:
+        - chemin_sauvegarde is defined

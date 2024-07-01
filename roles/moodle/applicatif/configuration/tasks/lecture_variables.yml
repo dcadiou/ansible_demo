@@ -1,0 +1,150 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Les taches ci-dessous permettent de lire toutes les variables définissant
+# les différents points de config enregistrés dans l'inventaire,
+# et de les controler autant que possible.
+# Ils deviennent alors disponibles pour les taches dans les faits du serveur,
+# sous forme
+#
+# * d'une liste de dictionnaires, nommée 'cfgs', contenant un dictionnaire par point de configuration.
+#
+#
+# * d'une copie de la liste précédante, 'cfgs', nommée 'cfgs_used', mais filtrée
+#   pour ne contenir que les points de config à modifier sur la plateforme.
+#
+# * d'une liste de dictionnaires, nommée 'multimedia_files', contenant un dictionnaire par fichier multimédia
+#   à déposer sur la plateforme (dans le système de fichier Moodle)
+#
+#
+# Pour plus d'infos, voir `inventories/group_vars/moodle/configs/readme.md`
+
+- name: initialisation de la liste des configs
+  ansible.builtin.set_fact:
+    cfgs_files: [] # les noms des variables de config
+    cfgs: [] # les points de configs qui y sont contenus
+    cfgs_used: [] # les points de configs a deployer sur la plateforme
+    multimedia_files: [] # les fichiers multimédias qui y sont décrits
+
+
+- name: alimentation du nom des liste de configs # en tant que faits Ansible
+  ansible.builtin.set_fact:
+    cfgs_files: "{{ hostvars[inventory_hostname] | select('match', '^configs.*') | list }}"
+    # Dans la liste des variables pour le host courant ('hostvars[inventory_hostname]'),
+    # on récupère les clefs (avec 'select'), donc le nom de ces variables (pas leur contenu),
+    # en ne gardant ('match') que celles qui satisfont la condition décrite par l'expression régulière
+    # qui désigne les textes qui commence ('^'), puis 'configs'
+    # et se terminent par n'importe quel caractère ('.'), un nombre quelconque de fois ('*').
+    # Le tout est reconditionné comme une liste ('| list').
+    # On a ainsi la liste des variables qui nous intéressent.
+
+
+- name: affichage des noms des liste de configs
+  ansible.builtin.debug:
+    msg: "{{ cfgs_files }}"
+
+
+- name: alimentation des listes des configs
+  # Mêmes commentaires qu'à la tache précédante
+  vars:
+    plateforme_configs:
+      "{{ item | selectattr('plateformes', 'undefined') | list
+      | union(
+        item | selectattr('plateformes', 'defined') | selectattr('plateformes', 'contains', plateforme) | list
+      )
+      | list }}"
+      # Liste de tous les points de config sans attribut 'plateformes' ( | selectattr('plateformes', 'undefined') )
+      # complété ('| union')
+      # de tout ceux avec attribut 'plateformes' ( | selectattr('plateformes', 'defined') )
+      # et dans la liste des plateformes concernées, (selectattr('plateformes'),
+      # la plateforme courante ( 'contains', plateforme) )
+    used_configs:
+      "{{ plateforme_configs | selectattr('value', 'defined') | list
+      | union(
+        plateforme_configs | selectattr('external_value', 'defined') | list
+      )
+      | list }}"
+      # Liste de tous les points de config pour la bonne plateforme (`{{ plateforme_configs }}`)
+      # qui possède un attribut 'value' (`| selectattr('values', 'defined')`)
+      # complété ('| union')
+      # de tout ceux qui possède un attribut 'external_value' (`| selectattr(external_value', 'defined')`)
+  ansible.builtin.set_fact:
+    cfgs: "{{ cfgs + plateforme_configs }}"
+    # On ajoute (avec '+') à la liste des configs, cfgs,
+    # les éléments de la liste item, mais filtrée en fonction de la plateforme (plateforme_configs).
+    # autrement dit la liste des points de config contenus dans la variable parcourues
+    cfgs_used: "{{ cfgs_used + used_configs }}"
+  loop: "{{ cfgs_files | map('extract', hostvars[inventory_hostname]) | list }}"
+  # La liste de clés (cfgs_files) est utilisée en entrée d'une extraction ('map('extract', ...') d'élements
+  # contenus dans les variables pour le host courant ('hostvars[inventory_hostname]').
+  # L'ensemble est à nouveau reconditionné comme une liste ('| list').
+  # Cela permet de parcourir tous les ensembles de points de config
+  # contenus dans les variables dont le nom figure dans la liste de clés.
+
+
+- name: alimentation de la liste des fichiers multimedias # en tant que faits Ansible
+  vars:
+    conf_associee:
+      filearea: "{{ item.filearea if item.filearea is defined else item.name }}"
+      component: "{{ item.plugin if item.plugin is defined else '' }}"
+  ansible.builtin.set_fact:
+    multimedia_files: "{{
+      multimedia_files + (
+        item.files
+        | map('combine', conf_associee)
+        | list
+      ) }}"
+  loop: "{{ cfgs }}" # parcours de la liste de points de conf faite précédemment
+  when:
+    - skip_file_upload is not defined
+    - item.files is defined # les configs qui possèdent des descriptions de fichiers multimédias
+    # Pour compléter multimedia_files (partie set_fact:), on lui ajoute (avec '+')
+    # les éléments de la liste, files, de l'item parcouru (le point de config).
+    # Rappel 'item' est tour à tour chacun des éléments parcourus dans la boucle 'loop:'
+    # c'est-à-dire chaque point de configuration.
+    # Avec 'map()', chaque élément de la liste files (donc chaque dictionnaire décrivant 1 fichier unique)
+    # subit un traitement 'combine' qui fusionne ce dictionnaire
+    # avec le dictionnaire 'conf_associee' construit comme variable (partie vars:)
+    # par Exemple si item.files est composé de la description de 2 fichiers =
+    # [{
+    #     "contextid": 1,
+    #     "filename": "fichier1.txt",
+    #     "filepath": "/"
+    # },
+    # {
+    #     "contextid": 4,
+    #     "filename": "fichier2.txt",
+    #     "filepath": "/"
+    # }]
+    #
+    # Si conf_associee =
+    # { "component": "toto",
+    #   "filearea": "var1" }
+    #
+    # On obtient les léméents ci-dessous qui s'ajouteront à la liste multimedia_files
+    #     {
+    #         "component": "toto",
+    #         "filearea": "var1",
+    #         "contextid": 1,
+    #         "filename": "fichier1.txt",
+    #         "filepath": "/"
+    #     },
+    #     {
+    #         "component": "toto",
+    #         "filearea": "var1",
+    #         "contextid": 4,
+    #         "filename": "fichier2.txt",
+    #         "filepath": "/"
+    #     }

@@ -1,0 +1,45 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: explore processus actifs
+  ansible.builtin.command:
+    chdir: '/'
+    cmd: "ps -e -o command"
+  register: process_list
+
+- name: enregistre le nombre de processus cron moodle
+  ansible.builtin.set_fact:
+    crons_count: "{{ process_list.stdout_lines | select('search', 'admin.cli.cron') | list | length }}"
+    # Le nombre d'éléments (`| length`) dans la liste (`| list`) des lignes
+    # de la sortie standard de la tache précédente (`process_list.stdout_lines`)
+    # qui correspondent (`select('search', ...`) au pattern recherché (`'admin.cli.cron'`)
+
+- name: affiche notification si il reste des processus cron Moodle actif
+  ansible.builtin.pause:
+    prompt: "Il reste encore {{crons_count}} processus cron Moodle actifs sur le serveur.
+      Il serait préférable d'attendre leur fin.
+      En effet, il y a un très fort risque de plantage pour la suite,
+      notamment lors de la suppression des fichiers temporaires.
+      Vous devez attendre que ces processus se termine mais ça peut prendre du temps...
+      (pour controler l'évolution exécutez sur le serveur
+      `ps -e -o command | egrep admin.cli.cron | egrep -vi grep`).
+      Taper [Entrée] pour continuer quand ce sera bon ou [ctrl]+[c] pour interrompre le playbook."
+  when: crons_count | int > 0
+  register: response
+
+- name: confirme qu'il n'y a plus de cron Moodle actifs
+  ansible.builtin.debug:
+    msg: "Il n'y a plus de crons Moodle actifs"
+  when: crons_count | int == 0

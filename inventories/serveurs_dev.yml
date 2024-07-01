@@ -1,0 +1,126 @@
+# Copyright (C) 2024 Dumont Jean-Marie <jean-marie.dumont@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Ce fichier d'inventaire Ansible a été adapté pour ne conserver que les inventaires de l'hôte 'bs1' et la plateforme ecampus
+
+# Ces serveurs nécessite que l'utilisateur possède une connexion SSH prédéfinie
+# * un ~/.ssh/config configuré avec ces serveurs
+# * un agent SSH fonctionnel
+
+############################################################################
+# Groupes élémentaires de hosts
+
+bs1:
+  hosts:
+    bs1-pp:
+      ansible_host: [nom_hôte] # Configuration de l'hôte Ansible, masquée pour des raisons de sécurité
+
+############################################################################
+# Groupes parents de hosts par type
+
+serveurs_bd:
+  children:
+    bs1:
+  vars:
+    data_dir: /...
+    buffer_pool_size: ...
+    max_connections: ...
+
+serveurs_web:
+  children:
+    bs1:
+  vars:
+    php_version: ...
+    moodle_sources_communes: false # true si plusieurs serveurs web partagent le même dossier source Moodle
+    www_dir: /..
+    domaine: '{{ansible_host}}'
+    # Dans le dossier source de l'appli, pour un bon fonctionnement de Git,
+    # l'utilisateur courant doit être utilisateur propriétaire du dossier racine du dépôt.
+    appli_dir_owner: ...
+    appli_dir_group: ...
+    appli_dir_mode: u=...,g=...,o-... # 'X' ne s'applique qu'aux fichiers déjà exécutables ou dossiers (voir man chmod)
+    # Le compte du serveur web doit avoir tous les accès nécessaires au dossier des fichiers multimédias,
+    dataroot_dir_owner: ...
+    dataroot_dir_group: ...
+    dataroot_dir_mode: u=...,g=...,o-...# 'X' ne s'applique qu'aux fichiers déjà exécutables ou dossiers (voir man chmod)
+
+serveurs_de_cron:
+  hosts:
+    bs1-pp:
+
+############################################################################
+# Groupes parents de hosts par plateforme
+
+ecampus:
+  children:
+    bs1:
+  vars:
+    application: moodle
+    plateforme: ecampus
+    brandcolor: '#C10037'
+    bdds_name:
+      - ...
+    host_shortname: ECAMPUS-DEV
+    host_fullname: ECAMPUS-DEV - La plateforme de développement Unicaen Ecampus
+    host_description:
+    version_cible: MOODLE_401_UNICAEN_ecampus
+    roleid_teacher_ecampus: ..
+    roleid_student_ecampus: ..
+
+############################################################################
+# Groupes (grand-)parents de hosts par application
+
+moodle:
+  children:
+    ecampus:
+  vars:
+    moodle_dir: '/.../moodle'
+    dataroot_dir: '.../moodledata'
+    moodle_url: 'https://{{domaine}}'
+
+############################################################################
+# Groupes (grand-grand-)parents de hosts
+
+serveurs_dev:
+  children:
+    serveurs_web:
+    serveurs_bd:
+  vars:
+    prod: false # Pour indiquer que les machines de cet inventaire ne sont pas en prod
+    ansible_become: true
+    db_conn: "{{vault_connexions_bd['dev']}}"
+    moodle_user: "{{vault_moodle_user['dev']}}"
+    depot_script: /opt/moodle_admin
+    backup_dir: /...
+    montages:
+      montage1:
+        src: # [adresse_ip]:source pour le montage NFS
+        path: # Chemin de montage NFS pour les sauvegardes ecampus
+        fstype: nfs
+        opts: ro,relatime,vers=3,hard,nolock,proto=tcp,mountvers=3,local_lock=all
+      montage2:
+        src: # [adresse_ip]:source pour le montage NFS
+        path: # Chemin de montage NFS pour la rétention de données
+        fstype: nfs
+        opts: ro,relatime,vers=3,hard,nolock,proto=tcp,mountvers=3,local_lock=all
+      exemple-tmpfs:
+        src: # source du montage temporaire
+        path: # Chemin du montage temporaire
+        fstype: tmpfs
+        opts: defaults,size=...
+
+cemu:
+  children:
+    serveurs_dev:

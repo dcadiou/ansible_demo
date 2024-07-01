@@ -1,0 +1,77 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+#
+# Gestion de XDebug, installation et activation ou désactivation selon.
+#
+# Voir https://webcemu.unicaen.fr/dokuwiki/doku.php?id=cemu:outils:logiciel:xdebug
+#
+
+# préalables
+- name: recherche php extension dir
+  ansible.builtin.command:
+    cmd: php-config --extension-dir
+  register: php_extension_dir
+  changed_when: false # forcée car cette tache ne fait que lire
+
+- name: XDebug installé ?
+  ansible.builtin.stat:
+    path: '{{php_extension_dir.stdout}}//xdebug.so'
+  register: xdebug_installed
+  changed_when: false # forcé car lecture seule
+
+- name: mise en place XDebug
+  when:
+    - actif == true
+  block:
+
+    - name: install XDebug
+      ansible.builtin.command:
+        # La version de XDebug dépend de celle de php
+        cmd: pecl install xdebug-9.9.9
+      environment:
+        - http_proxy: '{{proxy}}'
+        - https_proxy: '{{proxy}}'
+      when:
+        - php_version == ...
+        - xdebug_installed.stat.exists == false
+
+    - name: Fichier de config XDebug
+      ansible.builtin.template:
+        src: templates/xdebug.ini.j2
+        dest: /etc/php/{{ php_version }}/mods-available/xdebug.ini
+      vars:
+        php_extension_dir: '{{php_extension_dir.stdout}}'
+        profiler_actif: true
+        client_ip: # à adapter si utilisation distante
+
+    - name: activation de l'extension dans php
+      ansible.builtin.command:
+        cmd: phpenmod xdebug
+      #changed_when: ... # malheureusement aucun moyen de savoir si le module était déjà autorisé
+        # la commande ne retourne rien.
+      notify:
+        - service_php_reload
+        - check_php_xdebug_actif
+
+- name: desactivation de l'extension dans php
+  ansible.builtin.command:
+    cmd: phpdismod xdebug
+  #changed_when: ... # malheureusement aucun moyen de savoir si le module était déjà autorisé
+    # la commande ne retourne rien.
+  notify:
+    - service_php_reload
+    - check_php_xdebug_inactif
+  when: actif == false

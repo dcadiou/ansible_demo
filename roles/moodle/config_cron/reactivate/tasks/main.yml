@@ -1,0 +1,60 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Réactive les taches programmées et ad'hoc
+# suite à leur neutralisation temporaire.
+
+
+# Taches programmées
+- name: reactivation taches programmees et adhoc
+  vars:
+    plateforme_configs:
+      "{{ configs_core | selectattr('plateformes', 'undefined') | list
+      | union(
+        configs_core | selectattr('plateformes', 'defined') | selectattr('plateformes', 'contains', plateforme) | list
+      )
+      | list }}"
+      # Liste de tous les points de config coeur (configs_core)
+      # définis dans l'inventaire,
+      # sans attribut 'plateformes' ( | selectattr('plateformes', 'undefined') )
+      # complété ('| union')
+      # de tout ceux avec attribut 'plateformes' ( | selectattr('plateformes', 'defined') )
+      # et dans la liste des plateformes concernées, (selectattr('plateformes'),
+      # la plateforme courante ( 'contains', plateforme) )
+    current_cfg: "{{ plateforme_configs | selectattr('name', '==', item) | first }}"
+      # Pt de configuration en cours de traitement
+      # concrètement les configs coeur pour la bonne plateforme (plateforme_configs),
+      # dont l'attribut name est le nom en cours de parcours ('item', voir la clause 'loop:')
+      # et dans cette liste seulement le 1er élément (il ne doit y en avoir qu'un normalement)
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    argv:
+      - "php"
+      - "admin/cli/cfg.php"
+      - "{{ '--name=' + current_cfg.name }}"
+      - "{{ ('--set=', current_cfg.value) | join ('') }}"
+  loop:
+    - cron_enabled
+    - task_scheduled_concurrency_limit
+    - task_adhoc_concurrency_limit
+
+
+# Cron Moodle
+- name: reactivation du cron moodle
+  ansible.builtin.cron:
+    name: "{{moodle_cron_name}}"
+    user: "{{moodle_cron_user}}"
+    job: "{{moodle_cron_job}}"
+    disabled: false

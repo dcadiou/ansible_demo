@@ -1,0 +1,131 @@
+# Copyright (C) 2024 Dumont Jean-Marie <jean-marie.dumont@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Machines de l'infra virtuelle. Voir [docker](../docker/readme.md).
+docker:
+  hosts:
+    webapp:
+      ansible_host: moodle-docker-webapp-1
+  vars:
+    ansible_connection: docker # connexion via docker CLI plutôt qu'en SSH
+    container_docker: true # pour indiquer qu'il s'agit d'un container docker
+    ansible_become: false
+    ansible_become_method: enable
+    www_dir: '/..'
+    dataroot_dir: '/.../moodledata'
+    domaine: 'localhost/moodle'
+    db_conn:
+      host: '...'
+      bd: '...'
+      user: '...'
+      pw: '...'
+
+local1:
+  hosts:
+    localhost:
+      ansible_host: localhost
+      ansible_connection: local
+      www_dir: 'indefini' # moodle_dir qui en dépend devra être précisé au lancement via un argument --extra-vars
+
+############################################################################
+# Groupes parents de hosts par type
+
+serveurs_bd:
+  children:
+    local1:
+  vars:
+    data_dir: ''
+    buffer_pool_size: ..
+    max_connections: ..
+    depot_script: ''
+    backup_dir: ''
+
+serveurs_web:
+  children:
+    local1:
+    docker:
+  vars:
+    php_version: ...
+    montages:
+      moodle-tmpfs:
+        src: tmpfs
+        path: /.../moodle-tmpfs
+        fstype: ...
+        opts: defaults,size=...
+    domaine: localhost
+    # Dans le dossier source de l'appli, pour un bon fonctionnement de Git
+    # l'utilisateur courant doit être utilisateur propriétaire du dossier racine du dépôt.
+    appli_dir_owner: ... #appli_dir_owner: "{{ lookup('env', 'USER') }}"
+    appli_dir_group: ...
+    appli_dir_mode: u=...,g=...,o-...# 'X' ne s'applique qu'aux fichiers déjà exécutables ou dossiers (voir man chmod)
+    # Le compte du serveur web doit avoir tous les accès nécessaires au dossier des fichiers multimédias,
+    dataroot_dir_owner: ...
+    dataroot_dir_group: ...
+    dataroot_dir_mode: u=...,g=...,o-...# 'X' ne s'applique qu'aux fichiers déjà exécutables ou dossiers (voir man chmod)
+
+serveurs_de_cron:
+  hosts:
+    localhost:
+    webapp:
+
+############################################################################
+# Groupes parents de hosts par plateforme
+
+ecampus:
+  children:
+    local1:
+    docker:
+  vars:
+    application: moodle
+    plateforme: ecampus
+    brandcolor: '#C10037'
+    bdds_name:
+        - ...
+    db_conn: "{{vault_connexions_bd['...']}}"
+    moodle_user: "{{vault_moodle_user['...']}}"
+    host_shortname: ECAMPUS-LOC
+    host_fullname: ECAMPUS-LOCAL
+    host_description:
+    version_cible: MOODLE_401_UNICAEN_ecampus
+    roleid_teacher_ecampus: ...
+    roleid_student_ecampus: ...
+
+############################################################################
+# Groupes (grand-)parents de hosts par application
+
+moodle:
+  children:
+    ecampus:
+
+  vars:
+    moodle_dir: '{{www_dir}}/moodle'
+    dataroot_dir: '{{ www_dir }}/moodledata'
+    moodle_sources_communes: false # true si plusieurs serveurs web partagent le même dossier source Moodle
+    moodle_url: 'https://{{domaine}}'
+
+############################################################################
+# Groupes (grand-grand-)parents de hosts
+
+serveurs_locaux:
+  children:
+    serveurs_web:
+    serveurs_bd:
+  vars:
+    prod: false # Pour indiquer que les machines de cet inventaire ne sont pas en prod
+    ansible_become: true
+
+cemu:
+  children:
+    serveurs_locaux:

@@ -1,0 +1,136 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Ajout extension oci8
+- name: Client Oracle
+  when: instantclient_version == ...
+  vars:
+    - oracle_home: /...
+  block:
+
+    - name: Client Oracle, dossier
+      ansible.builtin.file:
+        path: /...
+        state: directory
+
+    - name: Client Oracle, extraction archives
+      ansible.builtin.unarchive:
+        src: files/{{item}}
+        dest: /...
+      loop:
+        - instantclient-basic-linux.x.x.x.x.zip
+        - instantclient-sdk-linux.x.x.x.x.zip
+        - instantclient-sqlplus-linux.x.x.x.x.zip
+
+    - name: Client Oracle, liens symboliques
+      ansible.builtin.file:
+        src: /...
+        path: /...
+        state: link
+
+    - name: Client Oracle, configuration lien dynamique vers la librairie
+      ansible.builtin.lineinfile:
+        create: true
+        line: '{{oracle_home}}'
+        path: /...
+        regexp: "^.opt.oracle"
+
+    - name: Client Oracle, présence lien dynamique vers la librairie
+      ansible.builtin.command:
+        cmd: ldconfig -p
+      register: ldconfig_output
+      changed_when: false # forcée car cette tache ne fait que lire
+
+    - name: Client Oracle, activation lien dynamique vers la librairie
+      ansible.builtin.command:
+        cmd: ldconfig
+      when: ldconfig_output.stdout.find('libclntsh.so') == -1
+
+
+
+- name: Extension php oci8
+  when: oci8_version == '9.9.9'
+  vars:
+    - oci8_dir: /...
+    - oracle_home: /...
+  block:
+
+    - name: definition des variables d'environnement Oracle dans php-fpm
+      ansible.builtin.blockinfile:
+        path: /...
+        marker: '; {mark} ANSIBLE MANAGED BLOCK - Env Oracle'
+        insertafter: '^;env.TEMP. = '
+        block: |
+          env[ORACLE_HOME]={{oracle_home}}
+          ;env[PATH]={{oracle_home}}:$PATH ; necessaire ? pas testé !
+          ;env[LD_LIBRARY_PATH]={{oracle_home}}:$LD_LIBRARY_PATH ; necessaire ? pas testé !
+          env[ORACLE_SID]=XE
+
+    - name: oci8, téléchargement
+      ansible.builtin.get_url:
+        url: https://pecl.php.net/get/oci8-x.x.x.tgz
+        dest: /...
+      environment:
+        - http_proxy: '{{proxy}}'
+        - https_proxy: '{{proxy}}'
+
+    - name: oci8, extraction archive téléchargée
+      ansible.builtin.unarchive:
+        creates: '{{ oci8_dir }}' # module pas exécuté si ce chemin existe
+        remote_src: true # l'archive a décompresser est sur la machine cible
+        src: /...tgz
+        dest: /...
+
+    - name: oci8, compilation de l'extension, préparation
+      ansible.builtin.command:
+        chdir: '{{ oci8_dir }}'
+        cmd: phpize
+        creates: '{{ oci8_dir }}/configure' # module pas exécuté si ce chemin existe déjà
+
+    - name: oci8, compilation de l'extension, configuration
+      ansible.builtin.command:
+        chdir: '{{ oci8_dir }}'
+        cmd: './configure --with-oci8=shared,instantclient,{{oracle_home}}'
+        creates: '{{ oci8_dir }}/Makefile' # module pas exécuté si ce chemin existe déjà
+
+    - name: oci8, compilation de l'extension
+      ansible.builtin.command:
+        chdir: '{{ oci8_dir }}'
+        cmd: make all install
+        creates: '{{ oci8_dir }}/modules/oci8.so' # module pas exécuté si ce chemin existe déjà
+      register: oci8_compilation_result
+
+    - name: recherche php extension dir
+      ansible.builtin.command:
+        cmd: php-config --extension-dir
+      register: php_extension_dir
+      changed_when: false # forcée car cette tache ne fait que lire
+
+    - name: oci8, fichier de configuration php
+      ansible.builtin.template:
+        src: templates/oci8.ini.j2
+        dest: /...
+      vars:
+        oci8_extension_dir: '{{php_extension_dir.stdout}}'
+
+    - name: oci8, activation de l'extension dans php
+      ansible.builtin.command:
+        cmd: phpenmod oci8
+      #changed_when: ... # malheureusement aucun moyen de savoir si le module était déjà autorisé
+        # la commande ne retourne rien.
+      notify:
+        - service_php_reload
+        - check_php_oci8_cli
+        - check_oci8_dans_phpinfo

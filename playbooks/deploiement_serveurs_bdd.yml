@@ -1,0 +1,61 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# ##############################################################################
+# Playbook pour automatiser l'installation des serveurs de base de données
+# ##############################################################################
+
+# # Utilisation
+#
+# Le groupe de hosts est précisé à travers l'option '-l'
+# (voir fichier d'inventaire pour les noms de groupes ou de hosts possibles)
+#
+# Exemple d'appel :
+# ansible-playbook -i inventories/serveurs_pp.yml -l kbddecampus <options pour vault...> playbooks/installation_serveur_bdd.yml
+#
+#
+
+- name: Configuration proxies
+  gather_facts: yes # necessaire pour avoir l'OS
+  hosts: serveurs_bd
+  roles:
+    - role: roles/proxy
+
+- name: Verification des montages
+  gather_facts: no
+  hosts: serveurs_bd
+  roles:
+    - role: roles/montages
+      when: montages is defined
+
+- name: Installation des paquets communs
+  gather_facts: no
+  hosts: serveurs_bd
+  roles:
+    - role: roles/commun
+
+- name: Installation de Git
+  gather_facts: yes # on a besoin du userid
+  hosts: serveurs_bd
+  roles:
+    - role: roles/install_git
+
+- name: Installation de mariadb
+  gather_facts: no
+  hosts: serveurs_bd
+  roles:
+    - role: roles/mariadb/basique
+    - role: roles/mariadb/maintenance
+    - role: roles/mariadb/monitoring

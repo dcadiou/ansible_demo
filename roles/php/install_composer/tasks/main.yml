@@ -1,0 +1,62 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: composer, test presence
+  ansible.builtin.command:
+    cmd: composer -V
+  register: composer_check1
+  ignore_errors: true # ici l'erreur est attendue si composer n'est pas encore installé
+  changed_when: false # forcé car lecture uniquement
+  vars:
+    ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+    ansible_ssh_pipelining: true # voir issue #105
+
+- name: composer, Installation
+  when: composer_check1.rc != 0
+  environment:
+    - http_proxy: '{{proxy}}'
+    - https_proxy: '{{proxy}}'
+  block:
+
+    - name: composer, telechargement hash
+      ansible.builtin.uri:
+        url: https://composer.github.io/installer.sig
+        return_content: true
+      register: composer_hash
+
+    - name: composer, telechargement installeur
+      ansible.builtin.get_url:
+        dest: /var/tmp/composer-setup.php
+        url: https://getcomposer.org/installer
+        checksum: "sha384:{{composer_hash.content}}"
+
+    - name: composer, execution installation
+      ansible.builtin.command:
+        cmd: php /var/tmp/composer-setup.php --install-dir=... --filename=composer --quiet
+
+    - name: composer, suppression installeur
+      ansible.builtin.file:
+        path: /...
+        state: absent
+
+    - name: composer, verification
+      ansible.builtin.command:
+        cmd: composer -h
+      register: composer_check2
+      failed_when: composer_check2.rc != 0
+      changed_when: false # forcé car lecture uniquement
+      vars:
+        ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+        ansible_ssh_pipelining: true # voir issue #105

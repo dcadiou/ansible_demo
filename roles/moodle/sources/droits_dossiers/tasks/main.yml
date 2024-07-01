@@ -1,0 +1,157 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Garantie des bon droits pour les dossiers et fichiers Moodle
+# Inspiré de https://docs.moodle.org/401/en/Security_recommendations#Running_Moodle_on_a_dedicated_server
+# mais en y ajoutant des droits pour le groupe cemu
+
+- ansible.builtin.import_tasks:
+    file: ../roles/moodle/sources/droits_dossiers/tasks/group.yml
+
+# sources (www/moodle/)
+- name: droits dossiers parent
+  vars:
+    - ansible_become: true
+  ansible.builtin.file:
+    state: directory
+    path: '{{ moodle_dir }}/../'
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    mode: "{{dataroot_dir_mode}}"
+  run_once: '{{moodle_sources_communes}}' # si dossier commun à tous les serveurs, 'true' car 1 seule exécution suffit
+
+- name: droit d'access aux sources moodle
+  vars:
+    - ansible_become: true
+  ansible.builtin.file:
+    path: '{{ moodle_dir }}'
+    recurse: true
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+  run_once: '{{moodle_sources_communes}}' # si dossier commun à tous les serveurs, 'true' car  seule exécution suffit
+
+- name: droit d'access aux dossier systeme git des sources moodle 
+  vars:
+    - ansible_become: true
+  ansible.builtin.file:
+    path: '{{ moodle_dir }}/.git'
+    recurse: true
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+  run_once: '{{moodle_sources_communes}}' # si dossier commun à tous les serveurs, 'true' car  seule exécution suffit
+
+- name: droits dataroot
+  when: dataroot_dir is defined
+  vars:
+    - ansible_become: true
+  run_once: '{{moodle_sources_communes}}' # si dossier commun à tous les serveurs, 'true' car 1 seule exécution suffit
+  module_defaults:
+    ansible.builtin.file:
+      owner: "{{dataroot_dir_owner}}"
+      group: "{{dataroot_dir_group}}"
+      mode: "{{dataroot_dir_mode}}"
+  block:
+    # dataroot (moodledata/)
+
+    - name: examen dossiers dataroot
+      ansible.builtin.stat:
+        path: '{{dataroot_dir}}'
+      register: stat_dataroot
+      changed_when: false # forcé car lecture seule
+
+    - name: creation dossiers dataroot si besoin
+      ansible.builtin.file:
+        # voir module_defaults
+        path: '{{dataroot_dir}}'
+        state: directory
+      when: stat_dataroot.stat.exists == false # que si le dossier n'existait pas
+
+    - name: droit d'access a la racine dataroot
+      ansible.builtin.file:
+        # voir module_defaults
+        path: '{{dataroot_dir}}'
+        recurse: false
+        state: directory
+      when: skip_dataroot_permission_correction is not defined
+
+    - name: liste des sous-dossiers
+      ansible.builtin.command:
+        chdir: '{{dataroot_dir}}'
+        cmd: 'ls -1 -F' # '-F' pour afficher '/' en fin de ligne pour les dossiers
+      register: dataroot_ls
+      failed_when: false # tache en lecture seule
+      changed_when: false # tache en lecture seule
+
+    - name: examen sous-dossiers
+      ansible.builtin.stat:
+        path: '{{dataroot_dir}}/{{item}}'
+      register: stat_dataroot_subdir
+      changed_when: false # forcé car lecture seule
+      loop: "{{dataroot_ls.stdout_lines | select('search', '/$') | list }}" # que les dossiers ('/' en fin de ligne)
+
+    - name: recherche probleme sur sous-dossiers
+      ansible.builtin.debug:
+        msg: '{{item.path}} : mode = {{ "OK" if (item.mode == "...") else "Pb!" }},
+          user = {{ "OK" if (item.pw_name == dataroot_dir_owner) else "Pb!" }},
+          group = {{ "OK" if (item.gr_name == dataroot_dir_group) else "Pb!" }}'
+          # definition d'un message d'erreur si la condition (voir `when:`) est vraie
+      register: etat_dataroot
+      failed_when: false # lecture seule
+      loop: "{{ stat_dataroot_subdir.results | map(attribute='stat') | list }}"
+      # Liste (`| list`) des résultats (`.results`) obtenus
+      # par la tache précédente (`stat_dataroot_subdir`),
+      # mais uniquement l'attribut stat (`| map(attribute='stat')`)
+      loop_control:
+        label: '{{item.path}}'
+      when: # si l'un des paramètres de droits n'est pas conforme
+          (item.mode != "...")
+          or (item.pw_name != dataroot_dir_owner)
+          or (item.gr_name != dataroot_dir_group)
+
+    - name: correction recursive droit d'access aux sous-dossiers concernes (tres long)
+      ansible.builtin.file:
+        # voir module_defaults
+        path: '{{item.path}}'
+        recurse: true
+        state: directory
+      loop: "{{ etat_dataroot.results | selectattr('msg', 'defined') | map(attribute='item') | list }}"
+      # Liste (`| list`) des résultats (`.results`) obtenus
+      # par la tache précédente (`etat_dataroot`),
+      # seulement leur attribut item (`| map(attribute='item')`), car on n'a juste besoin du chemin,
+      # mais uniquement pour les résultats dont l'attribut msg existe (`| selectattr('msg', 'defined')`),
+      # c'est-à-dire ceux qui présentent un problème.
+      loop_control:
+        label: '{{item.path}}'
+      when: skip_dataroot_permission_correction is not defined
+
+    - name: enregistre un avertissement sur pb droit d'access aux sous-dossiers dataroot
+      vars:
+        warning:
+          type: "Problème droits d'accès dataroot"
+          description: "Les droits d'accès à ce dossier du dataroot ne sont pas ceux attendus.
+            Comme demandé, il n'ont pas été corrigés et devront l'être plus tard."
+          instance: "{{item}}" # l'attribut msg parcouru
+      ansible.builtin.include_tasks:
+        file: ../roles/commun/warnings/tasks/add_warning.yml
+      loop: "{{ etat_dataroot.results | selectattr('msg', 'defined') | map(attribute='msg') | list }}"
+      # Liste (`| list`) des attribtus msg (`| map(attribute='msg')`)
+      # des résultats (`.results`) obtenus par la tache concernée (`etat_dataroot`),
+      # mais uniquement les résultats dont l'attribut msg existe (`| selectattr('msg', 'defined')`),
+      # c'est-à-dire ceux qui présentent un problème.
+      when: skip_dataroot_permission_correction is defined

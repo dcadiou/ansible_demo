@@ -1,0 +1,30 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: check_php_oci8_cli
+  ansible.builtin.command:
+    cmd: php -m
+  register: modules_php
+  failed_when: expected_module not in modules_php.stdout_lines
+  changed_when: false # forcée car cette tache ne fait que lire
+  vars:
+    expected_module: '{{"oci8"}}'
+  tags:
+    - check
+
+- name: check_oci8_dans_phpinfo
+  ansible.builtin.include_tasks: # include appelle toutes les taches du fichier inclut,
+    # import ne doit pas être utilisé car il faudrait appeler les taches du fichier une à une
+    file: check_phpinfo.yml

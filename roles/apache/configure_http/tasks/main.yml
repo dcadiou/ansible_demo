@@ -1,0 +1,36 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# conf apache (http)
+- name: Fichier de conf site httpd
+  ansible.builtin.template:
+    src: http.conf.j2
+    dest: '/../{{application}}.conf'
+
+- name: 'Activation site'
+  ansible.builtin.command:
+    cmd: "a2ensite ..."
+  register: a2ensite_result
+  changed_when: a2ensite_result.stdout is not regex(application + " already enabled")
+  notify:
+    - service_apache2_reload
+
+- name: Désactivation du site par défaut
+  ansible.builtin.command:
+    cmd: "a2dissite ..."
+  register: a2dissite_result
+  changed_when: a2dissite_result.stdout is not regex("000-default already disabled")
+  notify:
+    - service_apache2_reload

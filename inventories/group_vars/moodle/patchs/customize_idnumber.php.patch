@@ -1,0 +1,32 @@
+diff --git a/customize_idnumber.php b/customize_idnumber.php
+new file mode 100644
+index 00000000000..edyrouejk
+--- /dev/null
++++ b/customize_idnumber.php
+@@ -0,0 +1,26 @@
++<?php
++
++/**
++ * This snippet has been designed to be called by Moodle' Shibboleth plugin,
++ * as defined in 'auth_shibboleth | convert_data' configuration point.
++ *
++ * Its purpose is to add a prefix, which is site dependant, to the user idnumber
++ * for it to be unique, and thus usable with the 'offline quiz' plugin, without any conflict risk
++ * between idnumbers that could has been similar on both universities.
++ */
++
++if (isset($result['idnumber']) && isset($result['username'])) {
++    // Prefix definition
++    $prefix = ''; //prefix to be adde to the idnumber
++    if (strpos($result['username'], "@unicaen.fr") !== false) {
++        $prefix = '1';
++    }
++    if (strpos($result['username'], "@univ-rouen.fr") !== false) {
++        $prefix = '2';
++    }
++
++    // prefix application
++    if (strlen($result['idnumber']) == 8) { // Adapt only if it exists
++        $result['idnumber'] = $prefix . $result['idnumber'];
++    }
++}

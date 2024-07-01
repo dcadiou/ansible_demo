@@ -1,0 +1,153 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Playbook de préparation d'un dépôt source Moodle vers une version mineure donnée
+#
+# ### Les arguments à passer sous la forme
+#   --extra-vars '{"la variable":"sa valeur", }'
+#
+# Arguments Obligatoires
+# * version_origin : le nom de la version officielle à utiliser comme point de départ,
+#                     c'est-à-dire un tag (par exemple 'v3.11.16')
+#                     ou une branche (par exemple 'MOODLE_311_STABLE')
+# * moodle_dir : le chemin du dépôt Git Moodle à mettre à jour
+#
+# Arguments optionnels
+# * prefixe_branche : pour préparer le dépôt dans une série de branches temporaires de test,
+#                     sans poluer les branches de production.
+#
+# Variables pour neutraliser une partie des taches, sous la forme
+# "variables1":true, "variables2":true, etc
+# Le playbook test uniquement si ces variables sont définies,
+# donc NE PAS LES DEFINIR si elle ne sont pas nécessaires, plutôt que les définir à `false`.
+#
+# Les variables disponibles :
+# * "skip_dataroot_permission_correction":true, pour ne pas corriger les éventuelles anomalies
+#     de droits d'accès aux fichiers dans le dataroot.
+#     Cela suppose que l'on privilégie le risque d'avoir des fichiers inaccessibles
+#     dans le dataroot à celui d'avoir une opération de déploiement trop longue.
+#
+#
+# Exemple de définition des arguments, noter la partie '--extra-vars'
+# ansible-playbook \
+  # -i inventories/serveurs_locaux.yml \
+  # -l local1 \
+  # <options pour vault...> \
+  # playbooks/majs_moodle/prepa_depot.yml \
+  # --extra-vars '{"version_origin":"MOODLE_401_STABLE","moodle_dir":"/chemin/du/depot"}' \
+  # --ask-become-pass
+#
+# '--ask-become-pass' est nécessaire pour les opérations en `sudo` exécutées localement.
+#
+
+- name: Check arguments
+  hosts: local1
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+  - name: check Variables
+    ansible.builtin.assert:
+      that: item.valeur is search(item.pattern)
+      fail_msg: "Ce playbook doit être appelé avec {{ item.nom }} défini dans une option --extra-vars, sur un tag (ex: 'v3.11.16') ou une branche (ex: 'MOODLE_311_STABLE') du dépôt officiel"
+      success_msg: 'Paramètre {{ item.nom }} présent (= {{ item.valeur }} )'
+    loop:
+      - version_origin:
+        nom: version_origin
+        valeur: "{{version_origin}}"
+        pattern: "^(v|MOODLE_)"
+      - nom: moodle_dir
+        valeur: "{{moodle_dir}}"
+        pattern: "^/"
+
+- name: exploration depot
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: local1
+  vars:
+    - depot_cible: "{{depots.officiel}}"
+    - version_cible: "{{version_origin}}" # pour préparer le dépôt avec une version officielle
+      # et non une version locale dans l'inventaire
+  roles:
+    - role: roles/moodle/sources/depot/init
+
+
+- name: etiquetage du depart
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: local1
+  tasks:
+    - name: extraction commit courant du projet Ansible
+      command:
+        cmd: "git log -1 --format=format:\"%h\""
+      delegate_to: localhost # execution locale
+      register: commit
+
+    - name: etiquetage du depart de la nouvelle version
+      vars:
+        - version: "{{hostvars[inventory_hostname]['moodle']['version_complete']}}"
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: 'git tag -f local_origine_{{version}} -m "[ANSIBLE] Commit de la branche officielle qui a servi de point de départ à la maj {{version}} (Ansible en version {{commit.stdout}})"'
+
+
+- name: construction branche
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: local1
+  vars:
+    - branche_temporaire_commune: "{{hostvars[inventory_hostname]['moodle']['branche_temporaire']}}"
+  roles:
+    # arguments passés au rôle comme paramètres, pas comme variables (pour éviter l'issue #45)
+    - role: roles/moodle/sources/depot/construction_branche
+      suffixe: ""
+      branche_temporaire: "{{branche_temporaire_commune}}"
+    - role: roles/moodle/sources/depot/construction_branche
+      plateforme_cible: "ecampus"
+      suffixe: "_{{plateforme_cible}}"
+      branche_depart: "{{branche_temporaire_commune}}"
+      branche_temporaire: "{{branche_temporaire_commune}}{{suffixe}}"
+    - role: roles/moodle/sources/depot/construction_branche
+      plateforme_cible: "collegium"
+      suffixe: "_{{plateforme_cible}}"
+      branche_depart: "{{branche_temporaire_commune}}"
+      branche_temporaire: "{{branche_temporaire_commune}}{{suffixe}}"
+    - role: roles/moodle/sources/depot/construction_branche
+      plateforme_cible: prelude
+      suffixe: "_{{plateforme_cible}}"
+      branche_depart: "{{branche_temporaire_commune}}"
+      branche_temporaire: "{{branche_temporaire_commune}}{{suffixe}}"
+
+
+- name: finalisation
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: local1
+  tasks:
+    - name: retour sur la branche principale # facultatif
+      vars:
+        - branche: "{{hostvars[inventory_hostname]['moodle']['branche_locale']}}"
+      ansible.builtin.command:
+        chdir: "{{moodle_dir}}"
+        cmd: "git checkout --recurse-submodules {{branche}}"
+
+    - name: suppression de la branche temporaire commune # qu'on a pas pus supprimer avant, car réutilisée
+      vars:
+        - branche_temporaire: "{{hostvars[inventory_hostname]['moodle']['branche_temporaire']}}"
+      ansible.builtin.command:
+        chdir: "{{moodle_dir}}"
+        cmd: "git branch -D {{branche_temporaire}}" # '-D' pour forcer la suppression (voir issue #46) quand HEAD n'est pas sur la branche temporaire car abandonnée
+
+
+- name: affiche les avertissements
+  hosts: serveurs_de_cron
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  run_once: true
+  roles:
+    - roles/commun/warnings

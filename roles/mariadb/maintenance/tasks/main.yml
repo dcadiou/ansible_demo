@@ -1,0 +1,61 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: instanciation dépôt avec les scripts necessaires
+  ansible.builtin.git:
+    dest: '{{depot_script}}'
+    repo: git@example.com:etablissement/repository.git
+    update: true
+    accept_hostkey: true #NOTE: 'accept_newhostkey' serait mieux mais requiert une version récente d'ansible_env # permet l'acceptation automatique de la clé du depôt distant la 1ere fois
+  vars:
+    ansible_become: true # depot réservé à root
+  environment:
+    - http_proxy: '{{proxy}}'
+
+- name: supprime le crontab existant # et evite d'y laisser des entrées obsolète que ce playbook ne saurait supprimer
+  ansible.builtin.command:
+    cmd: 'crontab -r'
+  register: result
+  failed_when:
+    - result.rc != 0 # code de retour non nul
+    - result is not search('no crontab for root') # et autre erreur que celle-ci
+
+- name: Ajout tache cron sauvegardes
+  ansible.builtin.cron:
+    name: 'Cron sauvegardes (géré par ANSIBLE, NE PAS TOUCHER ICI) :' # ce nom identifie l'entrée dans le crontab.
+      # S'il est modifié, une nouvelle entrée est créé
+    disabled: "{{ false if prod is defined else true }}" # pas de sauvegarde auto en préprod
+    job: ...
+    hour: ...
+    minute: ...
+
+- name: Ajout taches cron optimisations
+  ansible.builtin.cron:
+    name: 'Cron optimisation tables {{bdd}} (géré par ANSIBLE, NE PAS TOUCHER ICI) :' # ce nom identifie l'entrée dans le crontab.
+      # S'il est modifié, une nouvelle entrée est créé
+    disabled: false
+    job: ...
+    hour: ...
+    minute: '00'
+    weekday: '00' # idem '07' = dimanche
+  loop: '{{bdds_name}}'
+  loop_control:
+    loop_var: bdd
+    index_var: idx
+
+- name: configuration du logrotate pour les optimisations
+  ansible.builtin.copy:
+    src: ...
+    dest: ...

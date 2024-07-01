@@ -1,0 +1,19 @@
+# Copyright (C) 2024 Dumont Jean-Marie <jean-marie.dumont@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Ce fichier suit la même logique que les fichiers serveur_dev et serveur_locaux, mais est orienté vers la préproduction.
+# En effet, les fichiers serveur_dev et serveur_locaux contiennent des configurations détaillées pour les environnements de développement et locaux.
+# Ce fichier devrait contenir des configurations similaires, mais adaptées à l'environnement de préproduction.
+# Cependant, pour des raisons de sécurité, les inventaires des serveurs de préproduction ne sont pas inclus ici.

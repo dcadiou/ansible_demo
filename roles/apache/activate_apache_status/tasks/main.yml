@@ -1,0 +1,45 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Configuration page status apache
+- name: Désactivation du status apache
+  when: status_apache == false
+  ansible.builtin.command:
+    cmd: 'a2dismod status'
+  register: a2dismod_result
+  changed_when: a2dismod_result.stdout is not regex("status already disabled")
+  notify:
+    - service_apache2_reload
+
+# Ou bien
+- name: Activation du status apache
+  when: status_apache == true
+  block:
+    - name: 'Installation www-browser'
+      apt:
+        name:
+          - links # necessaire pour disposer de la commande apachectl fullstatus
+        state: present
+        install_recommends: false
+
+    - name: Activation du module de status d'apache
+      ansible.builtin.command:
+        cmd: 'a2enmod status'
+      register: a2enmod_result
+      changed_when: a2enmod_result.stdout is not regex("status already enabled")
+      notify:
+        - service_apache2_reload
+        - check_apache2_status
+        - check_apache2_status_full

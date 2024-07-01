@@ -1,0 +1,36 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: paquetage de langue traite
+  ansible.builtin.debug:
+    msg: "Ajout du paquetage de langue '{{ item }}'"
+
+- name: recherche du paquetage dans moodle
+  ansible.builtin.stat:
+    path: "{{dataroot_dir}}/lang/{{item}}"
+  register: paquetage_installe
+
+- name: telechargement et extraction du paquetage de langue si besoin
+  environment:
+    - http_proxy: '{{proxy}}'
+    - https_proxy: '{{proxy}}'
+  ansible.builtin.unarchive:
+    remote_src: true
+    src: "https://download.moodle.org/download.php/direct/langpack/{{version_moodle}}/{{item}}.zip"
+    dest: "{{dataroot_dir}}/lang"
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    mode: "{{dataroot_dir_mode}}"
+  when: paquetage_installe.stat.exists == false # installer si le paquetage n'est pas encore installé

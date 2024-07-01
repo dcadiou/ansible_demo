@@ -1,0 +1,165 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+- name: controle existence commande jq
+  delegate_to: localhost
+  vars:
+    ansible_become: false
+  ansible.builtin.command:
+    cmd: "jq --version"
+  register: jq_response
+  failed_when: 0
+
+- name: affichage erreur de commande introuvable si besoin
+  ansible.builtin.assert:
+    that: "{{ jq_response.rc == 0 }}"
+    success_msg: "Ok"
+    fail_msg: "Cette tache a besoin de la commande 'jq', qui n'est visiblement pas installée sur votre poste."
+
+
+- name: Recuperation infos officielles des plugins depuis moodle.org en json
+  delegate_to: localhost
+  vars:
+    ansible_become: false
+  ansible.builtin.uri:
+    url: https://download.moodle.org/api/1.3/pluglist.php
+    dest: /tmp/plugins.json
+  environment:
+    - http_proxy: '{{proxy}}'
+    - https_proxy: '{{proxy}}'
+  when: moodle_org_json is not defined
+
+- name: indique que le json a deja ete telecharge
+  ansible.builtin.set_fact:
+    moodle_org_json: 'ready'
+
+
+- name: requetage du json voir sil existe une release du plugin compatible
+  delegate_to: localhost
+  vars:
+    ansible_become: false
+    json_query: ".plugins | .[]
+      | select(.component == \"{{ plugin.name }}\")
+      | .versions | .[]
+      | .supportedmoodles | .[]
+      | select(.release == \"{{short_release}}\")"
+      # Sélection dans la liste `| .[]` contenu dans l'attribut plugins `.plugins`
+      # l'élément `select()` dont l'attribut component = le nom de notre plugin `.component == \"plugin.name\"`
+      # puis dans la liste `| .[]` contenu dans  son attribut versions `| .versions`
+      # puis dans la liste `| .[]` contenu dans  son attribut supportedmoodles `| .supportedmoodles`
+      # extrait les éléments `| select()` dont l'attribut release `.release == `
+      # a la valeur attendue `short_release`, celle du Moodle courant
+  command:
+    cmd: "jq '{{json_query}}' /tmp/plugins.json"
+  register: exploration_releases
+  loop: "{{ plugins_installed }}"
+    # loop sur liste des plugins installé
+  loop_control:
+    loop_var: plugin # nom de la variable qui contient chaque objet parcouru
+
+
+- name: enregistre un avertissement si absence d une release compatible
+  vars:
+    warning:
+      type: "Plugin, aucune version déclarée compatible avec Moodle {{short_release}}"
+      description: "Le json Moodle.org n'a aucune release de ce plugin possédant
+        une compatibilité déclarée notre version de Moodle, {{short_release}}.
+        Certaines release du plugin, notamment celle utilisée, sont peut-être compatible,
+        mais il faudra tester manuellement."
+      instance: "{{ item.plugin.name }}"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  loop: "{{exploration_releases.results | selectattr('stdout', 'defined') | selectattr('stdout', '==', '') | list }}"
+    # loop sur liste des résultats, mais uniquement ceux dont la sortie standard
+    # `stdout` est vide, signe qu'aucune release compatible n'a été trouvée
+
+
+- name: requetage du json pour trouver le plugin dans la version choisie
+  delegate_to: localhost
+  vars:
+    ansible_become: false
+    json_query: ".plugins | .[]
+      | select(.component == \"{{ plugin.name }}\")
+      | .versions | .[]
+      | select((.release == \"{{ plugin.release if plugin.release != '' else 'non précisée' }}\") or (.version == \"{{ plugin.version }}\"))"
+      # dans l'attribut plugins `.plugins`, dans la liste qu'il contient `| .[]`
+      # l'élément `select()` dont l'attribut component = le nom de notre plugin `.component == \"plugin.name\"`
+      # dans son attribut versions `| .versions`, dans sa liste `| .[]`
+      # celles dont la release, `.release ==...`, ou, `or`, la version, `.version ==`, est celle installée
+  command:
+    cmd: "jq '{{json_query}}' /tmp/plugins.json"
+  register: recherche_release
+  loop: "{{ plugins_installed }}"
+    # loop sur liste des plugins installé
+  loop_control:
+    loop_var: plugin # nom de la variable qui contient chaque objet parcouru
+
+
+- name: enregistre un avertissement si absence de la version du plugin dans le json
+  vars:
+    warning:
+      type: "Plugin, version choisie non décrite"
+      description: "Le json Moodle.org ne contient pas la version courante du plugin.
+        Elle est peut-être compatible, mais il faudra le tester manuellement
+        ou choisir une autre version dont la compatibilité est déclarée."
+      instance: "{{ item.plugin.name }}, version {{ item.plugin.version }} '{{ item.plugin.release }}'"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  loop: "{{recherche_release.results | selectattr('stdout', '==', '') | list }}"
+    # loop sur liste des résultats, mais uniquement ceux dont la sortie standard
+    # `stdout` est vide, signe que la release/version n'a été trouvée dans le json
+
+
+- name: requetage du json voir si la version choisie est compatible
+  delegate_to: localhost
+  vars:
+    ansible_become: false
+    json_query: ".plugins | .[]
+      | select(.component == \"{{ plugin.name }}\")
+      | .versions | .[]
+      | select((.release == \"{{ plugin.release if plugin.release != '' else 'non précisée' }}\") or (.version == \"{{ plugin.version }}\"))
+      | .supportedmoodles | .[]
+      | select(.release == \"{{short_release}}\")"
+      # dans l'attribut plugins `.plugins`, dans la liste qu'il contient `| .[]`
+      # l'élément `select()` dont l'attribut component = le nom de notre plugin `.component == \"plugin.name\"`
+      # dans son attribut versions `| .versions`, dans sa liste `| .[]`
+      # celles dont la release, `.release ==...`, ou, `or`, la version, `.version ==`, est celle installée
+      # dans son attribut supportedmoodles `| .supportedmoodles`, dans sa liste `| .[]`
+      # extrait les éléments `| select()` dont l'attribut release `.release == `
+      # a la valeur attendue `short_release`
+  command:
+    cmd: "jq '{{json_query}}' /tmp/plugins.json"
+  register: exploration_release
+  loop: "{{ plugins_installed }}"
+    # loop sur liste des plugins installé
+  loop_control:
+    loop_var: plugin # nom de la variable qui contient chaque objet parcouru
+
+
+- name: enregistre un avertissement si la release choisie n'a pas de compatibilite declaree
+  vars:
+    warning:
+      type: "Plugin, version choisie décrite, mais non déclarée compatible avec Moodle {{short_release}}"
+      description: "Le json Moodle.org contient bien la version choisie du plugin,
+        mais celle-ci n'a pas de compatibilité déclarée avec Moodle {{short_release}}.
+        Elle est peut-être compatible, mais il faudra le tester manuellement
+        ou en choisir une autre dont la compatibilité est déclarée."
+      instance: "{{ item.plugin.name }}, version {{ item.plugin.version }} '{{ item.plugin.release }}'"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  loop: "{{exploration_release.results | selectattr('stdout', 'defined') | selectattr('stdout', '==', '') | list }}"
+    # loop sur liste des résultats, mais uniquement ceux dont la sortie standard
+    # `stdout` est vide, signe qu'aucune release compatible n'a été trouvée

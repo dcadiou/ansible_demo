@@ -1,0 +1,98 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# {{patch}} est un des dictionnaires présent dans la liste des patchs (dans roles/moodle/sources/depot/patchs/files/...)
+# rappel, il possède
+  # {{patch.localisation}}
+  # {{patch.patch}}
+
+  # Vérification que la copie de travail est propre avant d'appliquer le patch
+  # car ensuite tout ce que le patch change sera validé (commit) en l'état.
+  # Il ne doit donc pas exister d'autre changements que ceux que le patch va induire.
+- name: copie de travail propre avant application ?
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git status'
+  register: result
+  changed_when: 0 # tache en lecture seule
+  failed_when:
+    - result.stdout is not search 'propre'
+    - result.stdout is not search 'clean'
+
+- name: copie de travail plugin propre avant application ?
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}/{{plugin_path}}'
+    cmd: 'git status'
+  register: result
+  changed_when: 0 # tache en lecture seule
+  failed_when:
+    - result.stdout is not search 'propre'
+    - result.stdout is not search 'clean'
+  loop: "{{patch.plugins}}"
+  loop_control:
+    loop_var: plugin_path
+  when: patch.plugins is defined
+
+
+- name: affichage nom patch a appliquer
+  ansible.builtin.debug:
+    msg: '{{patch.patch}}'
+
+- name: 'depose du fichier de patch'
+  ansible.builtin.copy:
+    remote_src: false # les fichiers sont copiés depuis la machine de contrôle vers la cible
+    src: '../../{{patch.localisation}}/{{patch.patch}}.patch' # la localisation s'appréhende depuis le dossier qui contient le présent playbook
+    dest: '{{moodle_dir}}'
+
+- name: 'application du patch'
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git apply {{moodle_dir}}/{{patch.patch}}.patch'
+
+- name: enregistrement dans la liste des patchs
+  ansible.builtin.lineinfile:
+    path: '{{moodle_dir}}/liste_des_patchs.md'
+    line: '{{patch.patch}}.patch'
+    create: true # creation de la liste si besoin
+    state: present
+
+- name: ajout des modifs induites par le patch à l'index git du sous-module
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}/{{plugin_path}}'
+    cmd: 'git add --all' # ajoute tout ce qui a changé
+  loop: "{{patch.plugins}}"
+  loop_control:
+    loop_var: plugin_path
+  when: patch.plugins is defined
+
+- name: validation du patch dans git du sous-module
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}/{{plugin_path}}'
+    cmd: 'git commit -m "[ANSIBLE] [PATCH] Application du patch {{patch.patch}}"'
+  loop: "{{patch.plugins}}"
+  loop_control:
+    loop_var: plugin_path
+  when: patch.plugins is defined
+  # Le `git commit` du sous depôt doit être fait avant le `git add` dans le depot parent
+
+- name: ajout des modifs induites par le patch à l'index git du parent
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git add --all' # ajoute tout ce qui a changé
+
+- name: validation du patch dans git du parent
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git commit -m "[ANSIBLE] [PATCH] Application du patch {{patch.patch}}"'

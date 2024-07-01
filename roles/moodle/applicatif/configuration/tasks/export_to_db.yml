@@ -1,0 +1,120 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: initialisation des donnes de definition des tables Ansible en BD
+  vars:
+    v_table_i: ...
+    v_table_f: ...
+  ansible.builtin.set_fact:
+    table_i: "{{v_table_i}}"
+    table_f: "{{v_table_f}}"
+    q_items: "use {{db_conn.bd}};\n
+      drop table if exists {{v_table_i}};\n
+      create table {{v_table_i}} (
+        `name` text,
+        `plugin` text,
+        `to_be_ignored` text,
+        `default` text,
+        `value` text,
+        `external_value` text,
+        `files` text,
+        `filearea` text,
+        `plateformes` text
+        );\n"
+        # '{{item.plateformes}}' # car utilisé en amont pour filtrer la bonne plateforme
+    q_files: "use {{db_conn.bd}};\n
+      drop table if exists {{v_table_f}};\n
+      create table {{v_table_f}} (
+        `filename` text,
+        `filepath` text,
+        `component` text,
+        `filearea` text,
+        `contextid` text
+        );\n"
+        # '{{item.itemid}}',
+    tmp_script: /tmp/script.sql
+
+
+- name: donnees insertion items de configs
+  vars:
+    row: "INSERT INTO {{table_i}} (
+      `name`, `plugin`, `to_be_ignored`, `default`, `value`, `external_value`, `files`, `filearea`, `plateformes`
+      ) VALUES (
+      '{{ item.name }}',
+      '{{ item.plugin if item.plugin is defined else 'null' }}',
+      '{{ item.to_be_ignored if item.to_be_ignored is defined else 'null' }}',
+      '{{ item.default if item.default is defined else 'null' }}',
+      '{{ (item.value| regex_replace(\"'\", \"''\") | regex_replace('\x22', '\\\x22') ) if item.value is defined else 'null' }}',
+      '{{ item.external_value if item.external_value is defined else 'null' }}',
+      '{{ ((item.files | length), ' objets') | join('') if item.files is defined else 'null' }}',
+      '{{ item.filearea if item.filearea is defined else 'null' }}',
+      '{{ (item.plateformes | join(',')) if item.plateformes is defined else 'null' }}'
+      )"
+      # `value` fait l'objet de plusieurs échappement de caractères :
+      # Les `'` ne doivent pas être reçu par mysql comme des fins de string,
+      # donc être échappés avec une répétition du `'` : `''`. Voir `| regex_replace(\"'\", \"''\")`
+      # Les `"` ne doivent pas être compris comme une fin de requête par la commande `mysql ... -e "___"`,
+      # donc être échappés avec `\"`. Voir `| regex_replace('\x22', '\\\x22')`, sachant que le caractère 22 en hexa est `"`.
+  ansible.builtin.set_fact:
+    q_items: "{{ q_items }} {{ row | regex_replace(\"'null'\", 'NULL') }};\n"
+    # Les chaines `'null'` sont remplacées par `NULL`
+  loop: "{{cfgs}}"
+
+
+- name: generation script sql temporaire
+  ansible.builtin.copy:
+    content: "{{q_items}}"
+    dest: "{{tmp_script}}"
+    force: true
+
+
+- name: enregistrement des données d items de config
+  ---
+
+
+- name: donnees insertion configs fichiers
+  vars:
+    row: "INSERT INTO {{table_f}} (
+      `filename`, `filepath`, `component`, `filearea`, `contextid`
+      ) VALUES (
+      '{{item.filename}}',
+      '{{item.filepath}}',
+      '{{item.component if item.component is defined else 'null'}}',
+      '{{item.filearea}}',
+      '{{item.contextid}}'
+      )"
+      # '{{item.itemid}}',
+  ansible.builtin.set_fact:
+    q_files: "{{ q_files }} {{ row | regex_replace(\"'null'\", 'NULL') }};\n"
+  loop: "{{multimedia_files}}"
+
+
+- name: generation script sql temporaire
+  ansible.builtin.copy:
+    content: "{{q_files}}"
+    dest: "{{tmp_script}}"
+    force: true
+
+- name: suppression script sql temporaire
+  ansible.builtin.file:
+    path: "{{tmp_script}}"
+    state: absent
+
+- name: purge facts
+  ansible.builtin.set_fact:
+    table_i: ''
+    table_f: ''
+    q_items: ''
+    q_files: ''

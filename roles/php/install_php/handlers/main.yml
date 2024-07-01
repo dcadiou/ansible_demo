@@ -1,0 +1,33 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- import_tasks: ../roles/apache/install_apache/handlers/main.yml
+
+- name: service_php_reload
+  ansible.builtin.service:
+    name: php{{php_version}}-fpm
+    state: reloaded
+
+- name: service_php_restart
+  ansible.builtin.service:
+    name: php{{php_version}}-fpm
+    state: restarted
+  tags:
+    - rupture
+
+- name: check_phpinfo_ok
+  ansible.builtin.include_tasks: # include appelle toutes les taches du fichier inclut,
+    # import ne doit pas être utilisé car il faudrait appeler les taches du fichier une à une
+    file: ../../install_php/tasks/check_phpinfo.yml

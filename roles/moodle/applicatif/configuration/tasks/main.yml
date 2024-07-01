@@ -1,0 +1,121 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: dossier des paquetages de langues # creation, droits si besoin
+  ansible.builtin.file:
+    path: "{{dataroot_dir}}/lang"
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    mode: "{{dataroot_dir_mode}}"
+    state: directory
+
+- name: installation des paquetages de langue
+  vars:
+    version_moodle: 4.1
+    langs:
+      - 'fr'
+      - 'ca'
+      - ...
+
+  ansible.builtin.include_tasks:
+    file: ../roles/moodle/applicatif/configuration/tasks/install_lang.yml
+  loop: "{{ langs }}"
+
+- name: execution tache programmee de mise à jour des paquetages de langues
+  ansible.builtin.command:
+    chdir: "{{moodle_dir}}"
+    argv:
+      - "php"
+      - "admin/cli/scheduled_task.php"
+      - "--force" # Car les taches programmées sont désactivées
+      - "--execute=\\tool_langimport\\task\\update_langpacks_task"
+  register: maj_lang
+
+- name: affichage resultat maj langues
+  ansible.builtin.debug:
+    msg: "{{maj_lang.stdout}}"
+
+- name: lancer purge du cache sur tous les serveurs
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/applicatif/maintenance/tasks/purge_cache.yml
+
+
+- name: lecture des variables
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/applicatif/configuration/tasks/lecture_variables.yml
+
+
+- name: controle des variables
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/applicatif/configuration/tasks/controle_variables.yml
+
+
+- name: export des configs en BD
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/applicatif/configuration/tasks/export_to_db.yml
+
+
+- name: televersement des fichiers multimedias
+  vars:
+    - temp_dir: "/tmp" # sans `/` à la fin
+    - file: "{{item}}"
+  ansible.builtin.include_tasks:
+    file: ../roles/moodle/applicatif/configuration/tasks/televersement_fichier.yml
+  loop: "{{ multimedia_files }}"
+  loop_control:
+    label: "{{ item.filename }}"
+  when: skip_file_upload is not defined
+
+
+- name: Application des configurations coeur
+  vars:
+    external_value_file: "{{ ('../inventories/group_vars/moodle/' + 'configs/' + item.external_value) if item.external_value is defined else '' }}"
+    is_template: "{{ (external_value_file | splitext | last) == '.j2'}}"
+    value_from_file: "{{ lookup('ansible.builtin.template', external_value_file, convert_data=is_template) if item.external_value is defined else '' }}"
+    value_to_be_defined: "{{ item.value if item.value is defined else value_from_file }}"
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    argv:
+      - "php"
+      - "admin/cli/cfg.php"
+      - "{{ '--name=' + item.name }}"
+      - "{{ ('--set=', value_to_be_defined) | join ('') }}"
+  loop: "{{ cfgs_used }}"
+  loop_control:
+    label: "{{item.name}}"
+  when:
+    - item.plugin is undefined
+
+
+- name: Application des configurations plugins
+  vars:
+    configs_subdir: "{{ 'plugins/' if item.plugin is defined else '' }}"
+    external_value_file: "{{ ('../inventories/group_vars/moodle/' + configs_subdir + 'configs/' + item.external_value) if item.external_value is defined else '' }}"
+    is_template: "{{ (external_value_file | splitext | last) == '.j2'}}"
+    value_from_file: "{{ lookup('ansible.builtin.template', external_value_file, convert_data=is_template) if item.external_value is defined else '' }}"
+    value_to_be_defined: "{{ item.value if item.value is defined else value_from_file }}"
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    argv:
+      - "php"
+      - "admin/cli/cfg.php"
+      - "{{ '--component=' + item.plugin }}"
+      - "{{ '--name=' + item.name }}"
+      - "{{ ('--set=', value_to_be_defined) | join ('') }}"
+  loop: "{{ cfgs_used }}"
+  loop_control:
+    label: "{{item.name}}"
+  when:
+    - item.plugin is defined

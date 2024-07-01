@@ -1,0 +1,54 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Garantie que le bon groupe existe avec des caractéristiques
+# les plus proches possible de l'attendu
+
+- name: controle presence d'un groupe pour l'equipe
+  check_mode: true # pour forcer une exécution sans modif sur le serveur
+  vars:
+    - ansible_become: true
+  ansible.builtin.group:
+    name: "{{team_group_name}}"
+    gid: "{{team_group_id}}"
+    state: present
+  register: group_ok
+
+- name: ajout du groupe si besoin
+  ansible.builtin.group:
+    name: "{{team_group_name}}"
+    gid: "{{team_group_id}}"
+    state: present
+  when:
+    - group_ok.changed == true # le groupe actuel ne convient pas
+    - group_ok.name is not defined # parce qu'il n'existe pas
+
+- name: enregistre un avertissement en cas de mauvais GID pour ce groupe
+  vars:
+    warning:
+      type: "Mauvais GID de groupe"
+      description: "Le groupe existe bien, malheureusement il n'a pas l'id attendu.
+        La situation peut et va rester ainsi, en revanche, sachez que si plusieurs serveurs
+        partagent un montage contenant des dossiers/fichiers dont ce groupe (son GID) est propriétaire,
+        il n'est pas garantie que les membres de ce groupe aient les droits attendus
+        sur tous les serveurs concernés.
+        En effet, le GID peut varier d'un serveur à l'autre."
+      instance: "{{team_group_name}}, GID {{group_ok.gid}} au lieu de {{team_group_id}}"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  when:
+    - group_ok.changed == true # le groupe actuel ne convient pas
+    - group_ok.gid is defined # il a un GID,
+    - group_ok.gid != team_group_id # mais pas le bon

@@ -1,0 +1,77 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: check absence de fichiers autorisés en dur dans apache
+  ansible.builtin.stat:
+    path: '{{item}}'
+  loop:
+    - /...
+    - /...
+  register: link_result
+
+- name: Raz des fichiers en dur
+  ansible.builtin.file:
+    path: '{{item.item}}'
+    state: absent
+  when: # exécuté que
+    - item.stat.exists == true # si les fichiers existent
+    - item.stat.islnk is not defined # et qu'ils ne sont pas des liens
+  loop: '{{link_result.results}}'
+
+- name: Fichier de configuration de php-fpm dans Apache
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+
+- name: Activation Fichier de configuration de php-fpm dans Apache
+  ansible.builtin.command:
+    cmd: "a2enconf php{{php_version}}-fpm"
+  register: a2enconf_result
+  changed_when: a2enconf_result.stdout is not regex("php" + php_version|string + "-fpm already enabled")
+  notify:
+    - service_php_reload
+
+- name: Fichier de configuration du module mpm_worker d'Apache
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+
+- name: Fichier de configuration du module fpm de php
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+- name: Desactivation modules mpm_prefork
+  ansible.builtin.command:
+    cmd: 'a2dismod {{ item }}'
+  loop:
+    - php{{php_version}}
+    - mpm_prefork
+  register: a2dismod_result
+  changed_when: a2dismod_result.stdout is not regex(item + " already disabled")
+  notify:
+    - service_php_restart
+
+- name: Activation modules mpm_worker
+  ansible.builtin.command:
+    cmd: 'a2enmod {{ item }}'
+  register: a2enmod_result
+  changed_when: a2enmod_result.stdout is not regex(item + " already enabled")
+  loop:
+    - proxy_fcgi
+  notify:
+    - service_apache2_restart
+    - service_php_restart
+    - check_php-fpm
+    - check_php-fpm_bis

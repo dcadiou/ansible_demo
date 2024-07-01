@@ -1,0 +1,124 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Le présent rôle a pour objectif de finaliser la construction de la nouvelle branche
+# en l'articulant au mieux avec une éventuelle ancienne branche locale de référence.
+# Ce rôle créer, remplace, utilise cette branche selon la situation.
+#
+# la logique implémentée est décrite dans https://git.exemple.fr/moodle/moodle_admin/-/issues/49
+# Son comportement recherche l'idempotence.
+
+# Branche
+- name: recherche de la branche locale localement
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git branch'
+  register: branches
+
+- name: recuperation de la branche locale, a distance si besoin
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git fetch origin {{branche_locale}}:{{branche_locale}}'
+  when: branches.stdout_lines | select('search', branche_locale) | list | length == 0 # si absente
+  register: fetch_result
+  failed_when:
+    - fetch_result.rc != 0 # echec de l'opération
+    - fetch_result.stderr is not search("Couldn't find remote ref")
+    - fetch_result.stderr is not search("impossible de trouver la référence distante")
+
+- name: nouvelle recherche de la branche locale
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git branch'
+  register: branches
+
+- name: recherche differences avec branche locale, si presente
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git diff HEAD {{branche_locale}}'
+  when: branches.stdout_lines | select('search', branche_locale) | list | length > 0 # si présente
+  register: differences
+
+# L'objectif du block ci-dessous est de faire une fusion Git
+# * de la branche locale suivie concernée (par exemple MOODLE_311_LOCALE)
+# * avec la branche temporaire qui vient d'être créée,
+# mais au profit exclusif de la branche temporaire.
+#
+# Autrement dit, branches locale et temporaires se rejoignent,
+# MAIS TOUT CE QUI EXISTAIT DANS LA BRANCHE LOCALE EST OUBLIÉ,
+# au profit de ce qui existe maintenant dans la branche temporaire.
+#
+# Pour le dire encore autrement, une nouvelle branche, temporaire,
+# vient d'être créée par la mise à jour mineure. Le présent block
+# amène la branche locale suivie à oublier ce qu'elle contenait,
+# pour se "déplacer" au bout de la branche temporaire (qui sera supprimée plus tard).
+- name: fusion de remplacement de la branche locale, si presente mais differente
+  vars:
+    - tag: "{{hostvars[inventory_hostname]['moodle']['tag_version']}}{{suffixe}}"
+  when:
+    - branches.stdout_lines | select('search', branche_locale) | list | length > 0 # si présente
+    - differences.stdout_lines | length > 0 # et différente
+  block:
+    - name: remplacement de la branche
+      ansible.builtin.debug:
+        msg: "la {{branche_temporaire}} va devenir {{branche_locale}}"
+
+    - name: fausse fusion, etape 1, branche locale dans branche temporaire
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: "git merge -s ours {{branche_locale}} -m \"[ANSIBLE] Fausse fusion (avec la strategie 'ours'), qui remplace intégralement ce qu'il y avait dans {{branche_locale}} par {{tag}}\""
+
+    - name: bascule sur la branche locale
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: 'git checkout {{branche_locale}}' # surtout pas de "--recurse-submodules" ici car on ne veut pas que la branche suivie conserve ses spécificités
+
+    - name: fausse fusion, etape 2, branche temporaire dans branche locale
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: "git merge {{branche_temporaire}}"
+
+
+- name: bascule sur la branche locale, si presente et identique
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git checkout {{branche_locale}}' # pas d'option '-b' cette fois
+  when:
+    - branches.stdout_lines | select('search', branche_locale) | list | length > 0 # si présente
+    - differences.stdout_lines | length == 0 # et identique
+
+- name: creation de la branche locale, si absente
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git checkout -b {{branche_locale}}'
+  when: branches.stdout_lines | select('search', branche_locale) | list | length == 0 # si absente
+
+
+# Tag
+- name: recherche du tag localement
+  vars:
+    - tag: "{{hostvars[inventory_hostname]['moodle']['tag_version']}}{{suffixe}}"
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git tag'
+  register: tags
+
+- name: forcer etiquetage au bout de cette nouvelle branche que ce soit necessaire ou pas
+  vars:
+    - version: "{{hostvars[inventory_hostname]['moodle']['version_complete']}}"
+    - tag: "{{hostvars[inventory_hostname]['moodle']['tag_version']}}{{suffixe}}"
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git tag -f {{tag}} -m "[ANSIBLE] Commit à la fin de la préparation de la version {{version}} pour {{suffixe}}"'

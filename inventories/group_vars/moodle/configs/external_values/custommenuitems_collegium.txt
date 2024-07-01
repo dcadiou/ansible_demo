@@ -1,0 +1,5 @@
+Tous les cours|/course/index.php\n
+Outils
+- ENT (Rouen)|https://ent.univ-rouen.fr" target="_blank
+- Plateforme Ecampus (Caen)|https://ecampus.unicaen.fr" target="_blank
+- Plateforme UniversiTice (Rouen)|https://universitice.univ-rouen.fr" target="_blank

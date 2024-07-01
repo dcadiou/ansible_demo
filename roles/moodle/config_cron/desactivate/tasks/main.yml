@@ -1,0 +1,69 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Neutralise les taches programmées et ad'hoc pour permettre
+# le bon déroulement d'opérations ponctuelles telle que les mises à jour Moodle.
+
+- name: initialisation variables de condition pour la gestion des taches Moodle
+  ansible.builtin.set_fact:
+    response:
+    adhocs_count:
+    crons_count:
+
+# Desactivation de toutes les taches programmees
+- name: Desactivation de toutes les taches programmees
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    argv:
+      - "php"
+      - "admin/cli/cfg.php"
+      - "{{ '--name=' + item.name }}"
+      - "{{ ('--set=', item.value) | join ('') }}"
+  loop:
+    - name: task_scheduled_concurrency_limit
+      value: 0 # provoque désactivation
+
+- name: vidage de la liste des taches adhoc
+  ansible.builtin.import_tasks:
+    file: check_adhoc.yml
+
+# Desactivation de toutes les taches adhoc
+- name: Desactivation de toutes les taches adhoc et du cron
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    argv:
+      - "php"
+      - "admin/cli/cfg.php"
+      - "{{ '--name=' + item.name }}"
+      - "{{ ('--set=', item.value) | join ('') }}"
+  loop:
+    - name: cron_enabled
+      value: 0 # provoque désactivation
+    - name: task_adhoc_concurrency_limit
+      value: 0 # provoque désactivation
+
+
+# Blocage temporaire des crons Moodle
+- name: blocage du cron moodle
+  ansible.builtin.cron:
+    name: "{{moodle_cron_name}}"
+    user: "{{moodle_cron_user}}"
+    job: "{{moodle_cron_job}}"
+    disabled: true
+
+
+- name: attente absence cron Moodle actif
+  ansible.builtin.import_tasks:
+    file: check_cron.yml

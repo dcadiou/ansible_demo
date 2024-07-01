@@ -1,0 +1,113 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: nommages du fichier
+  vars:
+    # on utilise ici des variables car les affectation de faits ne sont disponibles
+    # qu'au tour suivant ou à la tache suivante. On ne peut pas réutiliser
+    # des faits nouvellement affectés, au sein de la même tache.
+    v_filename_ext: "{{ file.filename | splitext | last }}" # extension du fichier
+    v_final_filename: "{{ (file.filename | splitext | first) if v_filename_ext == '.j2'
+      else file.filename }}" # Le nom du fichier sans son extension '.j2' éventuel
+      # Sachant que '(file.filename | splitext | first)' prend tout avant la dernière extension
+  ansible.builtin.set_fact:
+    filename_ext: "{{ v_filename_ext }}"
+    final_filename: "{{ v_final_filename }}"
+    tmp_filename: "{{ temp_dir }}{{ '/' if temp_dir is not search '/$' else '' }}{{v_final_filename}}" # le chemin complet du fichier temporaire
+    clean_filepath: "{{ file.filepath }}{{ '/' if file.filepath is not search '/$' else '' }}" # le filepath avec un `/` à la fin
+
+
+- name: affichage fichier en traitement
+  ansible.builtin.debug:
+    msg: "{{ clean_filepath + final_filename
+      + (
+        ( ' initialement ' + file.filename ) if filename_ext == '.j2' else ''
+        ) }}"
+
+
+- name: recherche preexistence du fichier
+  vars:
+    query: "SELECT id AS `count`
+      FROM prefixeMoodle_files
+      WHERE filename = '{{ final_filename }}'
+      AND filepath = '{{ file.filepath }}'
+      AND component = '{{ file.component }}'
+      AND filearea = '{{ file.filearea }}'
+      AND contextid = '{{ file.contextid if file.contextid is defined else 1 }}'
+      AND itemid = '{{ file.itemid if file.itemid is defined else 0 }}'
+      ;\n"
+      # '{{file.itemid}}',
+  ansible.builtin.command:
+    cmd: "mysql --batch --skip-column-names -h{{db_conn.host}} -u{{db_conn.user}} -p{{db_conn.pw}} {{db_conn.bd}} -e \"{{query}}\""
+  no_log: true # pour ne pas exposer des donnees sensibles
+  changed_when: false # lecture seule
+  register: preexistence
+
+
+- name: suppression fichier preexistent
+  vars:
+    fileid: "{{ preexistence.stdout }}"
+    cmd_moosh: "{{ ('moosh -n file-delete' ,fileid) | join (' ') }}" # toutes les portions de texte sont concaténées avec un espace
+    ansible_become_user: web_user # pour ne pas priver le serveur web d'accès
+    ansible_ssh_pipelining: true
+  ansible.builtin.command:
+    chdir: ...
+    cmd: ..
+  when: preexistence.stdout != ''
+
+
+- name: Depot temporaire du fichier hors template sur la cible
+  ansible.builtin.copy:
+    src: "../inventories/group_vars/moodle/dataroot_files/{{ clean_filepath }}{{ file.filename }}"
+    dest: "{{ tmp_filename }}"
+  when: filename_ext != '.j2' # si l'extension du fichier n'est pas '.j2'
+
+- name: Depot temporaire du fichier template sur la cible
+  ansible.builtin.template:
+    src: "../inventories/group_vars/moodle/dataroot_files/{{ clean_filepath }}{{ file.filename }}"
+    dest: "{{ tmp_filename }}"
+  when: filename_ext == '.j2' # si l'extension du fichier est '.j2'
+
+
+# Mise en oeuvre de https://redmine.unicaen.fr/Etablissement/issues/53820
+- name: versement du fichier temporaire dans le systeme de fichiers Moodle
+  vars:
+    ansible_become_user: web_user # pour ne pas priver le serveur web d'accès
+    ansible_ssh_pipelining: true
+    cmd_moosh: "{{ (
+      'moosh -n file-upload',
+      '--filearea=',
+      file.filearea,
+      '--component=' if (file.component | length) > 0 else '',
+      file.component,
+      '--filepath=',
+      file.filepath,
+      '--filename=',
+      final_filename,
+      '--contextid=',
+      file.contextid if file.contextid is defined else 1,
+      '--itemid=',
+      file.itemid if file.itemid is defined else 0,
+      tmp_filename
+      ) | join (' ') }}" # toutes les portions de texte sont concaténées avec un espace
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    cmd: "{{cmd_moosh}}"
+
+
+- name: Supression du fichier temporaire
+  ansible.builtin.command:
+    chdir: "{{ moodle_dir }}"
+    cmd: "rm -v {{tmp_filename}}"

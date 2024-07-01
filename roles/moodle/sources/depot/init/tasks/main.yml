@@ -1,0 +1,157 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Ce role initialise le dépot
+# 1. Vérifications préalables
+# 2. clone
+# 3. Extraction des références de version et autres noms de branches
+
+- name: affiche dossier cible
+  ansible.builtin.debug:
+    msg: "Préparation du dépôt {{moodle_dir}}"
+
+# 1. Vérifications préalables
+- name: check agent ssh # requis pour s'authentifier sur git.exemple.fr
+  ansible.builtin.assert:
+    that: lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') | length > 0
+    fail_msg: "La connexion au serveur n'a pas fait suivre d'agent SSH, il sera impossible de se connecter au depot"
+    success_msg: "OK"
+
+- name: dossier moodle existe deja
+  ansible.builtin.stat:
+    path: "{{moodle_dir}}/.git"
+  register: stat_depot_moodle
+
+- name: Installation ?
+  ansible.builtin.pause:
+    prompt: "Aucun dépôt Moodle n'existe encore sur {{ansible_host}}.
+      Plutôt que déployer une nouvelle version de Moodle,
+      êtes-vous sur de ne pas vouloir installer un nouveau Moodle ?
+      Si oui, utilisez plutôt le playbook installation_moodle.yml.
+      [Entrée] pour ignorer, [ctrl]+[c] pour interrompre."
+  when: stat_depot_moodle.stat.exists == false # si les fichiers système Git ont été trouvés
+
+- name: copie de travail propre
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git status --porcelain -b'
+  register: result
+  changed_when: 0 # tache en lecture seule
+  failed_when: (result.stdout_lines | length > 1)
+    or (result.stdout is search "\[")
+    # erreur si la copie de travail n'est pas propre (modifs. locales)
+      # OU si la copie de travail contient un ou des nouveaux commits
+  when: stat_depot_moodle.stat.exists == true # si les fichiers système Git ont été trouvés
+
+- name: verifie host du depot unicaen connu par SSH
+  # Est-il déjà dans ~/.ssh/knownhosts ? (puisque protocole SSH)
+  ansible.builtin.command:
+    chdir: '/'
+    cmd: "ssh-keygen -F {{depots.exemple.host}}"
+  register: known_host
+  failed_when: 0 # on ne veut pas arrêter ici, mais au moins aller jusqu'au message d'erreur suivant
+
+- name: affiche erreur si host inconnu
+  ansible.builtin.assert:
+    that: known_host.stdout is search('found')
+    fail_msg: "SSH refusera de se connecter au depot unicaen car ce sera sa 1ere visite
+      (faire préalablement un 'sudo ssh user@git.exemple.fr' manuellement)"
+    success_msg: "OK"
+
+
+# 2. clone
+- name: Vider le repertoire du depot si besoin
+  # Une suppression du dossier, plutôt qu'un vidage, pose probleme dans les infra virtuelles dockorisées
+  # car ce dossier y est un volume
+  ansible.builtin.command:
+    cmd: "find {{moodle_dir}} -mindepth 1 -delete"
+  when: stat_depot_moodle.stat.exists == true # si les fichiers système Git ont été trouvés
+
+- name: clone du depot
+  ansible.builtin.command:
+    chdir: "{{moodle_dir}}/../"
+    cmd: "git clone --recurse-submodules --branch {{version_cible}} {{depot_cible.url}} {{moodle_dir}}"
+
+- name: suppression prealable des depots distant
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: "git remote remove {{item.value.nom}}"
+  loop: "{{depots | dict2items}}"
+  register: remove_result
+  failed_when: 
+    - remove_result.rc != 0
+    - remove_result.rc != 2
+    # echec de l'opération si le code de retour n'est aucun des codes attendus (0 ou 2)
+
+- name: ajout depot officiel
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git remote add {{depots.officiel.nom}} {{depots.officiel.url}}'
+
+- name: ajout depot unicaen
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git remote add {{depots.exemple.nom}} {{depots.exemple.url}}'
+
+- name: correction eventuelle droit dossier
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/sources/droits_dossiers/tasks/main.yml
+
+
+# 3. Extraction des références de version et autres noms de branches
+- name: lit la ligne de version
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'egrep -o "^.version.*;" version.php'
+  register: ligne_version
+
+- name: lit la ligne de release
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'egrep -o "^.release.*;" version.php'
+  register: ligne_release
+
+- name: lit la ligne de branche
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'egrep -o "^.branch.*;" version.php'
+  register: ligne_branche
+
+- name: extrait le numéro de branche courant de Moodle
+  vars:
+    - v_version: '{{ligne_version.stdout | regex_search("[0-9]{10}\.[0-9]{2}")}}'
+    - v_version_mineure: '{{ligne_version.stdout | regex_search("\.[0-9]{2}")}}'
+    - v_release: '{{ligne_release.stdout | regex_search("[0-9]{1}\.[0-9]{1,2}\.[0-9]{1,2}[\+]?")}}'
+    - v_branche: '{{ligne_branche.stdout | regex_search("[0-9]{3}")}}'
+    - v_version_complete: '{{v_release}}-{{v_version_mineure}}'
+  ansible.builtin.set_fact:
+    moodle:
+      version: '{{v_version}}'
+      release: '{{v_release}}'
+      branche: '{{v_branche}}'
+      version_complete: '{{v_version_complete}}'
+      tag_version: 'local_{{v_version_complete}}'
+      version_cible: '{{version_cible}}'
+      branche_officielle: 'MOODLE_{{v_branche}}_STABLE'
+      branche_locale: '{{prefixe_branche}}{{nom_branche_locale_moodle_prefixe}}{{v_branche}}{{nom_branche_locale_moodle_suffixe}}'
+      branche_temporaire: tmp
+
+- name: affiche la synthese
+  vars:
+    - version: "{{hostvars[inventory_hostname]['moodle']['version']}}"
+    - release: "{{hostvars[inventory_hostname]['moodle']['release']}}"
+    - branche: "{{hostvars[inventory_hostname]['moodle']['branche']}}"
+  ansible.builtin.debug:
+    msg: 'Le depot est actuellement en release {{release}} (version {{version}}), sur la branche numéro {{branche}}'

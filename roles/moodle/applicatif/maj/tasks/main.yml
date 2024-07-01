@@ -1,0 +1,41 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: mise a jour de la base de donnees par Moodle
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/applicatif/maj/tasks/check_upgrade.yml
+
+- name: recherche des plugins absents du disque
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/uninstall_plugins.php --show-missing'
+  register: missing_result
+
+- name: lance la suppression eventuel de chaque plugins absent du disque
+  vars:
+    oldplugin: "{{ item.split('\t')[0] }}" # on utilise que la 2ième valeur (après la tabulation) de chaque ligne
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/applicatif/maj/tasks/uninstall_plugin.yml
+  loop: '{{missing_result.stdout_lines}}'
+
+- name: nouvelle mise a jour si besoin
+  when: missing_result.stdout_lines | length > 0 # si des plugins absents du disque avaient été trouvés
+    # et peut-être supprimés ensuite
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/applicatif/maj/tasks/check_upgrade.yml
+
+- name: lancer purge du cache sur tous les serveurs
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/applicatif/maintenance/tasks/purge_cache.yml

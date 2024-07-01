@@ -1,0 +1,33 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: Ajout des patchs communs
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/sources/depot/patchs/tasks/ajout_patch.yml
+  loop: "{{ hostvars[inventory_hostname].patchs | default([], true) | selectattr('plateformes', 'undefined') | list}}"
+    # loop sur liste des patchs dont l'attribut 'plateformes' n'existe pas
+  loop_control:
+    loop_var: patch
+  when: plateforme_cible is not defined
+
+
+- name: Ajout des patchs specifiques
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/sources/depot/patchs/tasks/ajout_patch.yml
+  loop: "{{ hostvars[inventory_hostname].patchs | default([], true) | selectattr('plateformes', 'defined') | selectattr('plateformes', 'contains', plateforme_cible) | list}}"
+    # loop sur liste des patchs dont l'attribut 'plateformes' existe et contient la plateforme voulue
+  loop_control:
+    loop_var: patch
+  when: plateforme_cible is defined

@@ -1,0 +1,40 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+- name: check_apache2_status
+  ansible.builtin.command:
+    cmd: "apache2ctl status"
+  register: status_result
+  failed_when: (status_result.rc != 0)
+    or (status_result.stderr | length > 0)
+  # Avec certaines erreurs rc = 0. Par exemple
+    # "rc": 0,
+    # "stderr": "Connection refused\n'www-browser -dump http://localhost:80/server-status' failed.\nMaybe you need to install a package providing www-browser or you\nneed to adjust the APACHE_LYNX variable in /etc/apache2/envvars",
+    # "stderr_lines": [
+    #     "Connection refused",
+    #     "'www-browser -dump http://localhost:80/server-status' failed.",
+    #     "Maybe you need to install a package providing www-browser or you",
+    #     "need to adjust the APACHE_LYNX variable in /etc/apache2/envvars"
+    # ],
+    # "stdout": "",
+    # "stdout_lines": []
+
+- name: check_apache2_status_full
+  ansible.builtin.command:
+    cmd: "apache2ctl fullstatus"
+  register: status_full_result
+  failed_when: (status_result.rc != 0)
+    or (status_result.stderr | length > 0)

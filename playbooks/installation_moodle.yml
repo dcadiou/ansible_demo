@@ -1,0 +1,120 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Playbook d'installation d'un Moodle
+# à la version définie dans le fichier d'inventaire
+#
+# Ce playbook ne s'exécute que pour une plateforme à la fois,
+# donc ne pas oublier l'argument '-l'
+# pour limiter les hosts à ceux de la bonne plateforme (voir inventaire)
+#
+# Exemple d'utilisation
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l prelude
+  # <option pour la vault...> \
+  # playbooks/installation_moodle.yml
+#
+# Eventuellement ajoute de une ou plusieurs variables pour neutraliser une partie des taches
+# sous la forme
+  # --extra-vars '{"variables1":true, "variables2":true, etc}'
+# Le playbook test uniquement si ces variables sont définies,
+# donc NE PAS LES DEFINIR si elle ne sont pas nécessaires, plutôt que les définir à `false`.
+#
+# Les variables disponibles :
+# * "skip_dataroot_permission_correction":true, pour ne pas corriger les éventuelles anomalies
+#     de droits d'accès aux fichiers dans le dataroot.
+#     Cela suppose que l'on privilégie le risque d'avoir des fichiers inaccessibles
+#     dans le dataroot à celui d'avoir une opération de déploiement trop longue.
+#
+
+- name: confirmation
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  run_once: true
+  tasks:
+    - name: message de confirmation
+      ansible.builtin.pause:
+        prompt: "Ce playbook va supprimer Moodle s'il existe déjà sur {{ansible_host}}.
+          Etes-vous sur (y/n) ?"
+      register: confirmation
+
+    - name: activation du mode
+      fail:
+        msg: "L'execution n'a pas été confirmée, donc STOP"
+      when: confirmation.user_input | lower != 'y'
+
+
+- name: preparation dossier
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/droits_dossiers
+
+
+- name: deploiement du depot
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  vars:
+    - depot_cible: "{{depots.unicaen}}"
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/depot/init # init depot
+
+
+- name: eventuelle suppression fichier de configuration de Moodle
+  # Necessaire si on veut que l'installation Moodle ci-après s'exécute.
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  run_once: '{{moodle_sources_communes}}'
+  tasks:
+    - name: suppression d'un eventuel fichier de config preexistent
+      ansible.builtin.file:
+        path: "{{moodle_dir}}/config.php"
+        state: absent
+
+
+- name: installation Moodle
+  # Permet principalement de créer la BD Moodle
+  # (et le fichier config.php, mais qui sera écrasé après)
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  vars:
+    - depot_cible: "{{depots.unicaen}}"
+    - nom_bd: "{{db_conn.bd}}"
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/applicatif/install
+
+
+- name: fichier de configuration de Moodle
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/config
+
+
+- name: rectification droits dossier
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_web
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/droits_dossiers
+
+
+- name: lancement playbook deploiement moodle
+  ansible.builtin.import_playbook: ../playbooks/deploiement_moodle.yml

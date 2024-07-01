@@ -1,0 +1,30 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: demande confirmation sortie mode maintenance
+  ansible.builtin.pause:
+    prompt: "Etes-vous prêt à désactiver le mode maintenance ?
+      ([Entrée] pour continuer)"
+  register: confirmation_maintenance
+
+- name: desactivation mode maintenance profond
+  ansible.builtin.import_tasks:
+    file: exit_deep_maintenance.yml
+  when: deep_maintenance is defined
+
+- name: desactivation mode maintenance
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/maintenance.php --disable'

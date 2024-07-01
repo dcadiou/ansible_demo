@@ -1,0 +1,79 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: creation dossier du depot
+  ansible.builtin.file:
+    path: '{{www_dir}}/lmsjonction'
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+
+- name: ajout ou mise a jour du depot Git
+  ansible.builtin.git:
+    dest: '{{www_dir}}/lmsjonction'
+    repo: git@git.exemple.fr:cadiou/lmsjonction.git
+    update: true # pour déplacer le pointeur HEAD si besoin
+    version: v3.2
+    accept_hostkey: true #NOTE: 'accept_newhostkey' serait mieux mais requiert une version récente d'ansible_env # permet l'acceptation automatique de la clé du depôt distant la 1ere fois
+  environment:
+    - http_proxy: '{{proxy}}'
+  notify:
+    - check_lmsjonction
+
+- name: ajout du fichier de Configuration
+  ansible.builtin.copy:
+    src: vault/config.php
+    dest: '{{www_dir}}/lmsjonction/config.php'
+    mode: ...
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+  notify:
+    - check_lmsjonction
+
+- name: droits d'acces au depot
+  ansible.builtin.file:
+    path: '{{www_dir}}/lmsjonction'
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+    state: directory
+    recurse: true
+
+- name: configuration conservation des log (logrotate)
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+
+# configuration des crons
+- name: configuration du cron update_odf
+  ansible.builtin.cron:
+    name: 'Cron lmsjonction update_odf (géré par ANSIBLE, NE PAS TOUCHER ICI) :' # ce nom identifie l'entrée dans le crontab.
+      # S'il est modifié, une nouvelle entrée est créé
+    user: root
+    disabled: false
+    job: 'php -f {{www_dir}}/lmsjonction/update_odf.php -- --suppr'
+    hour: ...
+    minute: ...
+
+- name: configuration du cron update_groups
+  ansible.builtin.cron:
+    name: 'Cron lmsjonction update_groups (géré par ANSIBLE, NE PAS TOUCHER ICI) :' # ce nom identifie l'entrée dans le crontab.
+      # S'il est modifié, une nouvelle entrée est créé
+    user: root
+    disabled: false
+    job: 'php -f {{www_dir}}/lmsjonction/update_groups.php -- --suppr'
+    hour: ...
+    minute: ..

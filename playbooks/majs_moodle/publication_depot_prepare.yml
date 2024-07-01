@@ -1,0 +1,90 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+#
+# Ce playbook finalise la préparation réalisée par le playbook de préparation du depot Moodle
+# en prenant en charge l'étape finale de publication.
+#
+# Le fait de dissocier playbook de preparation et playbook de publication,
+# permet à l'utilisateur de bien controller la qualité(/corriger) des branches préparées
+# sur une plateforme de test, avant de lancer leur publication avec le présent playbooks
+
+# ### Les arguments à passer sous la forme
+#   --extra-vars '{"la variable":"sa valeur", }'
+#
+# Arguments Obligatoires
+# * nom_version_branche : la partie numérique des noms de branche, par exemple '311' pour Moodle 3.11
+# * moodle_dir : le chemin du dépôt Git Moodle à pousser
+#
+# Arguments optionnels
+# * prefixe_branche : pour réaliser la publication dans une série de branches temporaires de test,
+#                     sans poluer les branches de production.
+#
+# Exemple d'usage'
+# ansible-playbook \
+  # -i inventories/serveurs_locaux.yml \
+  # -l local1 \
+  # <options pour vault...> \
+  # playbooks/majs_moodle/publication_depot_prepare.yml
+  # --extra-vars '{"nom_version_branche":"311","moodle_dir":"/chemin/du/depot"}' \
+  # --ask-become-pass
+#
+# '--ask-become-pass' est nécessaire pour les opération en `sudo` exécutées localement.
+
+- name: Check valeur arguments
+  hosts: local1
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  tasks:
+  - name: check Variables
+    ansible.builtin.assert:
+      that: item.valeur is search(item.pattern)
+      fail_msg: "Ce playbook doit être appelé avec {{ item.nom }} défini dans une option --extra-vars, par exemple '311'"
+      success_msg: 'Paramètre {{ item.nom }} présent'
+    loop:
+      - nom: nom_version_branche
+        valeur: "{{nom_version_branche}}"
+        pattern: "^[0-9]*$"
+      - nom: moodle_dir
+        valeur: "{{moodle_dir}}"
+        pattern: "^/"
+
+- name: publication
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: local1
+  tasks:
+
+    - name: push des branches locales
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: 'git push origin {{prefixe_branche}}{{nom_branche_locale_moodle_prefixe}}{{nom_version_branche}}{{nom_branche_locale_moodle_suffixe}}{{item}}'
+      loop:
+        - ''
+        - '_ecampus'
+        - '_collegium'
+        - '_prelude'
+
+    - name: listage des tags
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: 'git tag'
+      register: tags
+
+    - name: push des tags locaux
+      vars:
+        - tags_locaux: "{{ tags.stdout_lines | select('search', '^local_') | list }}"
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}'
+        cmd: 'git push origin {{item}}' # un tag peut être poussé plusieurs fois cela ne provoque pas d'erreur
+      loop: '{{tags_locaux}}'

@@ -1,0 +1,98 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+#NOTE: voir si xdotool est necessaire à moosh et debogguer les taches suivantes
+# - name: Installer le paquetage xdotool
+#   ansible.builtin.apt:
+#     name:
+#       - xdotool
+#     state: present
+#     install_recommends: false
+#
+# - name: config locale xdotool
+#   ansible.builtin.copy:
+#     src: files/.mooshrc.php
+#     dest: /root/.mooshrc.php # serait pris en compte pour le compte web_user ?
+
+- name: test presence moosh
+  ansible.builtin.command:
+    cmd: moosh --list-commands
+  register: moosh_present
+  become: false
+  ignore_errors: true # ici l'erreur est attendue si moosh n'est pas encore installé
+  changed_when: false # forcé car lecture uniquement
+  vars:
+    ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+    ansible_ssh_pipelining: true # voir issue #105
+
+- name: installation moosh
+  when: moosh_present.rc != 0
+  block:
+
+    - name: creation dossier du depot
+      ansible.builtin.file:
+        path: /opt/moosh
+        state: directory
+        owner: web_user
+
+    - name: récupération du depot
+      ansible.builtin.git:
+        dest: /opt/moosh
+        repo: https://github.com/tmuras/moosh.git
+        update: false
+      vars:
+        ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+        ansible_ssh_pipelining: true # voir issue #105
+      environment:
+        - http_proxy: '{{proxy}}'
+        - https_proxy: '{{proxy}}'
+
+    - name: composer update
+      community.general.composer:
+        command: update
+        working_dir: /...
+      vars:
+        ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+        ansible_ssh_pipelining: true # voir issue #105
+      environment:
+        - http_proxy: '{{proxy}}'
+        - https_proxy: '{{proxy}}'
+
+    - name: composer install
+      community.general.composer:
+        command: install
+        working_dir: /opt/moosh
+      vars:
+        ansible_become_user: web_user # pour ne pas lancer composer en tant que root
+        ansible_ssh_pipelining: true 
+
+    - name: lien symbolique dans le PATH #pour pouvoir lancer moosh sans préciser son chemin
+      ansible.builtin.file:
+        path: /...
+        src: /...
+        state: link
+      notify:
+        - check_moosh
+
+- name: droit d'access aux sources moosh
+  vars:
+    - ansible_become: true
+  ansible.builtin.file:
+    path: /...
+    recurse: true
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"

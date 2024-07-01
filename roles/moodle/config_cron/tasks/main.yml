@@ -1,0 +1,39 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+- name: dossier des logs moodle
+  ansible.builtin.file:
+    path: ...
+    state: directory
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    mode: "{{dataroot_dir_mode}}"
+
+- name: configuration du cron moodle
+  ansible.builtin.cron:
+    name: "{{moodle_cron_name}}" # ce nom identifie l'entrée dans le crontab.
+      # S'il est modifié, une nouvelle entrée est créé
+    user: "{{moodle_cron_user}}"
+    disabled: false
+    job: "{{moodle_cron_job}}"
+    minute: '...'
+
+# configuration conservation des log
+- name: configuration conservation des log Moodle
+  ansible.builtin.copy:
+    src: chemin source
+    dest: chemin destination
+

@@ -1,0 +1,10 @@
+# Infos sur l'état du dépôt Git Moodle en prod au moment de la sauvegarde SQL du même nom
+
+* commit = {{ commit_hash.stdout }}
+* version = {{ ligne_version.stdout | regex_search("[0-9]{10}\.[0-9]{2}") }}
+* release = {{ ligne_release.stdout | regex_search("[0-9]{1}\.[0-9]{1,2}\.[0-9]{1,2}[\+]?") }}
+* branche = {{ branches.stdout_lines | select("search", "^\*") | join("") | regex_replace("[* ]", "") }}
+
+## git status sur le dépôt
+
+{{ status.stdout }}

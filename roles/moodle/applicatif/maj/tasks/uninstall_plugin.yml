@@ -1,0 +1,34 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+- name: suppression du plugin absent du disque (parfois long)
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/uninstall_plugins.php --plugins={{oldplugin}} --run'
+  when:
+    - skip_deprecated_plugin is not defined
+
+- name: enregistre un avertissement sur la non suppression de ce plugin
+  vars:
+    warning:
+      type: "Plugin obsolète non supprimé"
+      description: "Le playbook a détecté l'existence d'un plugin obsolète
+        mais, comme demandé, ne l'a pas supprimé."
+      instance: "{{oldplugin}}"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  when:
+    - skip_deprecated_plugin is defined

@@ -1,0 +1,47 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+# Attente absence taches adhoc encore  en attente
+- name: extrait le nombre de taches adhoc en attente
+  no_log: true # pour ne pas exposer des donnees sensibles
+  ansible.builtin.command:
+    chdir: '/'
+    cmd: "mysql -h'{{db_conn.host}}' -u'{{db_conn.user}}' -p'{{db_conn.pw}}' {{db_conn.bd}} --skip-column-names -e \"SELECT COUNT(*) FROM prefixeMoodle_task_adhoc;\""
+  register: adhoc_search
+
+- name: enregistre le nombre de taches adhoc en attente
+  ansible.builtin.set_fact:
+    adhocs_count: "{{adhoc_search.stdout | int}}"
+
+- name: affiche notification si il reste des taches adhoc
+  ansible.builtin.pause:
+    prompt: "Il reste encore {{adhocs_count}} taches ad'hoc en attente,
+      ce qui n'est pas souhaitable avant une mise à jour majeure.
+      En effet, ces taches ont été créées avec l'ancienne version de moodle
+      et seront exécutées par la nouvelle.
+      Vous pouvez attendre que la liste se vide mais ça peut prendre du temps...
+      (pour controler l'évolution exécutez en base la requête
+      `SELECT COUNT(*) FROM prefixeMoodle_task_adhoc;`).
+      S'il s'agit d'une mise à jour mineure, vous pouvez passer outre et continuer.
+      Tapez [Entrée] pour continuer quand ce sera bon (ou passer outre)
+      ou [ctrl]+[c] pour interrompre le playbook."
+  when: adhocs_count | int > 0 # quand il reste des taches ad'hoc
+  register: response
+
+- name: confirme qu'il n'y a plus de taches adhoc dans la pile
+  ansible.builtin.debug:
+    msg: "Il n'y a plus de taches adhoc dans la pile"
+  when: adhocs_count | int == 0

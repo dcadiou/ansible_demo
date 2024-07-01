@@ -1,0 +1,122 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: Sous module
+  debug:
+    msg: "Ajout du plugin {{plugin.path}}"
+
+- name: controle le nom du dossier du sous module
+  ansible.builtin.assert:
+    that: plugin.path is not search('^/') # que le chemin ne commence pas par un '/'
+    fail_msg: "Le chemin {{plugin.path}} commence par un '/', or ce devrait être un chemin relatif"
+    success_msg: "ok"
+
+#TODO: mieux gérer erreur du type :
+# "stderr": "'mod/bigbluebuttonbn' existe déjà dans l'index et n'est pas un sous-module"
+- name: ajout sous modules
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git submodule add --force {{plugin.url}} {{chemin}}'
+  register: result
+  changed_when: result.stderr is not search('existe déjà')
+  failed_when:
+    - result.rc != 0
+      #TODO: mieux gérer erreur du type :
+      # "stderr": "'mod/bigbluebuttonbn' existe déjà dans l'index et n'est pas un sous-module"
+
+- name: enregistre un avertissement si dossier sous module deja utilisé
+  vars:
+    warning:
+      type: "Sous-module Git reutilisé"
+      description: "Git a déja enregistré ce chemin pour un sous-module dans une autre branche
+        et va le réutiliser (c'est-à-dire conserver l'URL initiale du dépôt associé).
+        Si cela ne vous convient pas, voir ... ."
+      instance: "{{chemin}}"
+  ansible.builtin.include_tasks:
+    file: ../roles/commun/warnings/tasks/add_warning.yml
+  when: result.stdout is search('Réactivation du répertoire git local pour le sous-module')
+
+- name: controle des droits dossiers sous module
+  vars:
+    - ansible_become: true
+  ansible.builtin.file:
+    path: '{{moodle_dir}}/{{plugin.path}}'
+    recurse: true
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+
+- name: choix du commit
+  block:
+    - name: positionnement sur un commit spécifique
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}/{{plugin.path}}'
+        cmd: 'git checkout --recurse-submodules {{plugin.version}}' # option pour peupler les éventuels sous modules du sous module
+      when: plugin.version is defined
+
+    - name: lit la ligne de version Moodle requise
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}/{{plugin.path}}'
+        cmd: 'egrep -o "plugin..requires.*;" version.php'
+      register: ligne_require
+
+    - name: lit la ligne de release du plugin
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}/{{plugin.path}}'
+        cmd: 'egrep -o "plugin..release.*;" version.php'
+      register: ligne_release
+      failed_when: ligne_release.rc > 1 # un code de retour à 1 est normal si la ligne n'est pastrouvée
+
+    - name: lit la ligne de version du plugin
+      ansible.builtin.command:
+        chdir: '{{moodle_dir}}/{{plugin.path}}'
+        cmd: 'egrep -o "plugin..version.*;" version.php'
+      register: ligne_version
+
+    - name: complete la liste des plugins installes
+      vars:
+        new_one:
+          - name: "{{plugin.name}}"
+            path: "{{plugin.path}}"
+            url: "{{plugin.url}}"
+            require: '{{ligne_require.stdout | regex_search("[0-9]{10}\.?[0-9]{0,2}") }}'
+            version: '{{ligne_version.stdout | regex_search("[0-9]{10}") }}'
+              # les 10 premiers chiffres (pas les décimals) pour être comparable à la version dans le json Moodle.org
+            release: "{{
+              ligne_release.stdout | regex_search('\".*\"') | regex_replace('\"', '')
+              if ligne_release.stdout != ''
+              else ''
+              }}"
+      ansible.builtin.set_fact:
+        plugins_installed: "{{ plugins_installed + new_one }}"
+
+    - name: enregistre les incompatibilites eventuelles de version requise
+      vars:
+        require_courant: "{{ (plugins_installed | selectattr('name', '==', plugin.name) | first)['require']}}"
+        # '{{ligne_require.stdout | regex_search("[0-9]{10}\.?[0-9]{0,2}")}}'
+        version_coeur: "{{hostvars[inventory_hostname]['moodle']['version']}}"
+        bad_plugin:
+          - "'{{ plugin.name }}' : ATTENTION BLOQUANT !!! requiert {{require_courant}} mais Moodle est sur {{version_coeur}} !"
+      ansible.builtin.set_fact:
+        plugins_incompatibles: "{{ plugins_incompatibles + bad_plugin }}"
+      when:
+        - ligne_require.stdout | length > 0
+        - require_courant > version_coeur
+
+- name: Ajout du plugin à l'index git du coeur
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: "git add {{plugin.path}}"

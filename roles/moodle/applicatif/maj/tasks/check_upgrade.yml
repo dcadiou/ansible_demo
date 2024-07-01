@@ -1,0 +1,40 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: mise a jour de la base de donnees par Moodle (long)
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/upgrade.php --non-interactive'
+  register: maj_result
+
+- name: affiche le resultat de la mise a jour de BD
+  ansible.builtin.debug:
+    var: maj_result
+
+- name: verifie resultat de la mise a jour de BD
+  ansible.builtin.assert:
+    that: # contrôle la présence des extraits de chaine 'cliupgradefinished'
+      # ou 'cliupgradenoneed', dans les 2 langues.
+      (maj_result.stdout_lines | select('search', '^Command line upgrade.*completed successfully') | list | length > 0)
+      or (maj_result.stdout_lines | select('search', '^Mise à jour en ligne de commande.*terminée avec succès') | list | length > 0)
+      or (maj_result.stderr_lines | select('search', '^No upgrade needed.*') | list | length > 0)
+      or (maj_result.stderr_lines | select('search', '^Aucune mise à jour nécessaire.*') | list | length > 0)
+    fail_msg: "La mise a jour de la base de données par Moodle a échoué"
+    success_msg: "OK"
+
+- name: pause additionnelle preventive # voir pb vu dans ...
+    # Il semblerait que parfois la maj de BD ne soit pas complètement finie même si Moodle l'affirme
+  ansible.builtin.pause:
+    seconds: 5

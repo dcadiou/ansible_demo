@@ -1,0 +1,70 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Enregistrement d'infos sur l'état courant du dépot dans un fichier de destination
+
+- name: lit le commit courant
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git log --format=%H -1 HEAD'
+  register: commit_hash
+  changed_when: false # lecture seule
+
+- name: lit la ligne de version
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'egrep -o "^.version.*;" version.php'
+  register: ligne_version
+  changed_when: false # lecture seule
+
+- name: lit la ligne de release
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'egrep -o "^.release.*;" version.php'
+  register: ligne_release
+  changed_when: false # lecture seule
+
+- name: lit la branche courante
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git branch'
+  register: branches
+  changed_when: false # lecture seule
+
+- name: lit le status du depot
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git status'
+  register: status
+  changed_when: false # lecture seule
+
+- name: copie de travail propre ?
+  ansible.builtin.assert:
+    that: status.stdout is search 'propre' or status.stdout is search 'clean'
+    fail_msg: "Attention la copie de travail n'est pas propre !"
+    success_msg: "OK"
+
+- name: creer le dossier de destination si besoin
+  ansible.builtin.file:
+    path: "{{destination | dirname}}"
+    state: directory # créer les dossiers ancetres s'ils manquent
+    owner: ...
+    group: ...
+    mode: ...
+
+- name: enregistre les infos dans la destination
+  ansible.builtin.template:
+    src: infos.md.j2
+    dest: "{{destination}}"

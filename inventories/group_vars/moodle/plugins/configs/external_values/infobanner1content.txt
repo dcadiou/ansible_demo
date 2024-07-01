@@ -1,0 +1,2 @@
+Une mise à jour de sécurité aura lieu le XXXX à partir de 20h. La plateforme sera indisponible durant au moins une heure.
+Après cette mise à jour, nous vous recommandons vivement de purger vos caches de navigateurs comme décrit dans la documentation suivante : https://fr.wikipedia.org/wiki/Aide:Purge_du_cache_du_navigateur

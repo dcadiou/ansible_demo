@@ -1,0 +1,62 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: initialisation de la BD et de l'utilisateur standard
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/bd/restauration/tasks/init.yml
+
+- name: processus d'installation moodle
+  vars:
+    arguments:
+      - # Permissions of new directories created within dataroot.
+      - # Installation and default site language.
+      - # Web address for the Moodle site,
+                        # required in non-interactive mode.
+      - #Location of the moodle data folder,
+                        # must not be web accessible. Default is moodledata
+                        # in the parent directory.
+      - # type. Default is mysqli
+      - # Database host. Default is localhost
+      - # Database name. Default is moodle
+      - # Database user. Default is root
+      - # Database password. Default is blank
+      - # Use database port.
+      # - "--dbsocket=PATH" # Use database socket, 1 means default. Available for some databases only.
+      - # Table prefix for above database tables. Default is prefixeMoodle_
+      - # The fullname of the site
+      - # The shortname of the site
+      - # The summary to be displayed on the front page
+      # - "--adminuser=USERNAME" # Username for the moodle admin account. Default is admin
+      - # Password for the moodle admin account,
+                        # required in non-interactive mode.
+      - # Email address for the moodle admin account.
+      # - "--upgradekey=STRING" # The upgrade key to be set in the config.php, leave empty to not set it.
+      - # No interactive questions, installation fails if any
+                        # problem encountered.
+      - # Indicates agreement with software license,
+                        # required in non-interactive mode.
+      - # Install even if the version is not marked as stable yet,
+                        # required in non-interactive mode.
+      # - "--skip-database" # Stop the installation before installing the database.
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: "php admin/cli/install.php {{ arguments | join(' ') }}"
+  no_log: true # pour ne pas exposer des donnees sensibles
+  register: result
+
+- name: affiche le resultat de l'install'
+  debug:
+    var: result
+#QUESTION: comment connaitre le statut final d'exécution de l'upgrade ?

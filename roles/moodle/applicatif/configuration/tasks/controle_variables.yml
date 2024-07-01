@@ -1,0 +1,128 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+- name: initialisation des variables de controle
+  ansible.builtin.set_fact:
+    attributs_detectes_niv1: [] # Les attributs de niveau 1 recensés dans les variables de config
+    attributs_detectes_niv2: [] # idem pour niveau 2
+    attributs_niv1_autorises: # les noms d'attributs autorisés au niveau 1
+      - plugin
+      - name
+      - default
+      - value
+      - plateformes
+      - files
+      - to_be_ignored
+      - external_value
+      - filearea
+      - table
+      - id
+    attributs_niv2_autorises: # les noms d'attributs autorisés au niveau 2
+      - component
+      - filearea
+      - contextid
+      - filepath
+      - filename
+
+
+- name: controle des valeurs avec template
+  ansible.builtin.assert:
+    that: false # vu le filtrage fait dans `loop`, on ne devrait avoir que les points en erreur (=false)
+    fail_msg: "Si la valeur de
+      {{ (item.plugin + '|') if item.plugin is defined else '' }}{{ item.name }}
+      , {{ item.value }}, est une expression Jinja,
+      elle devrait être de la forme {{ '{{}}' | quote }} (avec simple ou double guillemets)"
+  loop: "{{ cfgs | selectattr('value', 'defined') | selectattr('value', 'search', '[{}]') | list }}"
+    # Dans la liste des points de config `cfgs`, sélectionner ceux qui ont un atribut value `| selectattr('value', 'defined')`
+    # Lequel possède un attribut value avec une accolade `| selectattr('value', 'search', '[{}]')`
+  loop_control:
+    label: "{{item.name}}"
+
+
+- name: recensement des attributs de niveau 1 utilises
+  ansible.builtin.set_fact:
+    attributs_detectes_niv1: "{{ attributs_detectes_niv1 | union( item | select('all') | list ) }}"
+    # Dans un dictionnaire qui décrit un point de config (ici item),
+    # '| select("all")' retourne la liste de toutes les clés vues au 1er niveau (les sous niveaux sont ignorés).
+    # '| union()' ajoute à la liste des noms d'attributs déjà vus dans les variables
+    # les nouveaux noms qui n'y existeraient pas encore (sans redondance).
+  loop: "{{ cfgs }}"
+  loop_control:
+    label: "{{item.name}}"
+
+
+- name: controle absence attributs non autorises niveau 1
+  vars:
+    pattern: "^({{ attributs_niv1_autorises | join('|') }})$"
+    attributs_inattendus: "{{ attributs_detectes_niv1
+      | reject('search', pattern)
+      | list }}"
+      # "| reject('search'," permet d'enlever de la liste tous les noms
+      # qui respectent le pattern, pour ne garder que les erreurs
+  ansible.builtin.assert:
+    that: attributs_inattendus | length == 0
+    fail_msg: "Des attributs inattendus existent : {{attributs_inattendus}}, les attributs autorisés sont : {{attributs_niv1_autorises}}"
+    success_msg: "ok"
+
+
+- name: recensement des attributs de niveau 2 utilises
+  ansible.builtin.set_fact:
+    attributs_detectes_niv2: "{{ attributs_detectes_niv2 | union( item | select('all') | list ) }}"
+    # Même principe que pour la recherche de niveau 1.
+    # Ici item n'est pas un dictionnaire qui décrit un point de config, mais un fichier
+  loop: "{{ multimedia_files }}"
+  loop_control:
+    label: "{{item.filename}}"
+
+
+- name: controle absence attributs non autorises niveau 2
+  vars:
+    pattern: "^({{ attributs_niv2_autorises | join('|') }})$"
+    attributs_inattendus: "{{ attributs_detectes_niv2
+      | reject('search', pattern)
+      | list }}"
+  ansible.builtin.assert:
+    that: attributs_inattendus | length == 0
+    fail_msg: "Des attributs inattendus existent : {{attributs_inattendus}}, les attributs autorisés sont : {{attributs_niv1_autorises}}"
+    success_msg: "ok"
+
+
+- name: recherche des fichiers multimedias appeles dans config
+  delegate_to: localhost # execution locale
+  vars:
+    ansible_become: false # sans être root
+    clean_filepath: "{{ item.filepath }}{{ '/' if item.filepath is not search '/$' else '' }}" # le filepath avec un `/` à la fin
+  ansible.builtin.stat:
+    path: "../inventories/group_vars/moodle/dataroot_files/{{clean_filepath}}{{item.filename}}"
+  loop: "{{ multimedia_files }}"
+  loop_control:
+    label: "{{item.filename}}"
+  register: file_stat
+  failed_when: 0 # lecture seulement a ce stade
+  when: skip_file_upload is not defined
+
+
+- name: Affichage des erreurs de fichiers multimedias absents si besoin
+  ansible.builtin.assert:
+    that: file.stat.exists == true
+    success_msg: "Ok"
+    fail_msg: "Le fichier suivant n'a pas été trouvé ! {{file.invocation.module_args.path}}"
+    quiet: true
+  loop: "{{file_stat.results}}"
+  loop_control:
+    loop_var: file
+    label: "{{file.item.filename}}"
+  when: skip_file_upload is not defined

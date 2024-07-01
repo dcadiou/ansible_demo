@@ -1,0 +1,52 @@
+# Copyright (C) 2024 Dumont Jean-Marie <jean-marie.dumont@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Liste des patchs à appliquer
+#
+# Pour les patchs communs, définir les attributs
+# * 'localisation', pour la localisation du fichier .patch (chemin relatif depuis le playbook Ansible)
+# * 'patch', pour le nom du fichier (sans son extension '.patch')
+# * (optionnel) 'plugins', pour la liste des plugins qui sont impactés (une partie de leur code modifiée)
+#                          par le patch en question
+# * (optionnel) 'plateformes', pour les patchs spécifiques à une ou des plateformes
+#                              avec la même logique que pour la liste de plugins
+#                              (voir commentaires en tête de la liste concernée)
+#
+# Par exemple :
+#   - localisation: ../../roles/moodle/sources/depot/patchs/files/311
+#     patch: idnumber_in_assign
+#     plugins:
+#       - admin/tool/cohortdatabase
+#     plateformes:
+#       - ecampus
+#
+# Prérequis
+# Chaque fichier de patch dans la liste doit exister dans le dossier de ce fichier yml
+#
+patchs:
+  - localisation: inventories/group_vars/moodle/patchs
+    patch: idnumber_in_assign
+    # Patch qui ajoute l'idnumber de l'étudiant aux noms des fichiers de devoirs
+    # quand ils sont téléchargés
+
+  # - localisation: inventories/group_vars/moodle/patchs
+  #   patch: proxy_mnet
+    # Moodle 4 semble maintenant intégrer nativement une exploitation de la configuration proxy
+    # de la plateforme, ce qui rendrait inutile ce patch.
+
+  - localisation: inventories/group_vars/moodle/patchs
+    patch: customize_idnumber.php
+    plateformes:
+      - collegium

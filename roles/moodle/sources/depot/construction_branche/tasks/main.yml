@@ -1,0 +1,51 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: branche en cours
+  ansible.builtin.debug:
+    msg: "{{hostvars[inventory_hostname]['moodle']['branche_locale']}}{{suffixe}}"
+
+- name: retour sur la branche commune
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git checkout --recurse-submodules {{branche_depart}}'
+  when: branche_depart is defined
+
+- name: creation de la nouvelle branche
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git checkout -B {{branche_temporaire}}'
+
+- name: gestion des plugins
+  ansible.builtin.import_role:
+    name: roles/moodle/sources/depot/plugins
+
+- name: gestion des patchs
+  ansible.builtin.import_role:
+    name: roles/moodle/sources/depot/patchs
+
+- name: enregistrement de la branche locale et etiquetage
+  ansible.builtin.import_role:
+    name: roles/moodle/sources/depot/enregistrement_branche
+  vars:
+    - version: "{{hostvars[inventory_hostname]['moodle']['version_complete']}}"
+    - branche_locale: "{{hostvars[inventory_hostname]['moodle']['branche_locale']}}{{suffixe}}"
+
+- name: suppression branches temporaires
+  ansible.builtin.command:
+    chdir: "{{moodle_dir}}"
+    cmd: "git branch -D {{branche_temporaire}}" # '-D' pour forcer la suppression (voir issue #46) quand HEAD n'est pas sur la branche temporaire car abandonnée
+  when:
+    - plateforme_cible is defined # la branche temporaire commune (où plateforme_cible = not defined) va être réutilisée, on ne la supprime pas ici.

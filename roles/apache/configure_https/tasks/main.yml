@@ -1,0 +1,100 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# conf apache (https)
+- name: Fichier de conf site httpd SSL
+    # car trop spécifiques (à ajouter par ailleurs dans des roles dédiés peut-être)
+  ansible.builtin.template:
+    src: '{{application}}-...conf.j2'
+    dest: '/etc/apache2/sites-available/{{application}}-....conf'
+
+
+- name: recherche dossier certificats
+  ansible.builtin.stat:
+    path: '/etc/certificats/{{ domaine }}/'
+  changed_when: false # forcé car tache de lecture uniquement
+  register: certificats_dossier_status
+
+- name: recherche présence certificats
+  ansible.builtin.find:
+    paths: /etc/certificats/{{ domaine }}/
+    patterns:
+      - cert.pem
+      - privkey.pem
+      - fullchain.pem
+  changed_when: false # forcé car tache de lecture uniquement
+  register: certificats_fichiers_status
+  when: certificats_dossier_status.stat.exists == true
+
+
+- name: certificats, preprod
+  when:
+    - prod == false # en preprod uniquement
+    - (certificats_dossier_status.stat.exists == false)
+      or (
+        (certificats_dossier_status.stat.exists == true)
+        and (certificats_fichiers_status is defined)
+        ) # si le dossier n'existe pas ou s'il ne contient pas le bon nombre de certificats
+  block:
+    - name: Initialisation des donnees de certificats
+      ansible.builtin.set_fact:
+        certificats_source_path: '../inventories/group_vars/serveurs_web/domaine_certificates/{{domaine}}'
+        certificats_files:
+          - cert.pem
+          - privkey.pem
+          - fullchain.pem
+
+    - name: Creation dossier certificats
+      ansible.builtin.file:
+        state: directory
+        path: "/.../{{ domaine }}/"
+
+    - name: Téléversement certificats
+      ansible.builtin.copy:
+        src: "{{certificats_source_path}}/{{item}}"
+        dest: /.../{{ domaine }}/
+        mode: ...
+      loop: "{{certificats_files}}"
+
+    - name: Ouverture droits fichiers publiques certificats
+      ansible.builtin.file:
+        path: ...
+        mode: ...
+        state: file
+      loop:
+        - cert.pem
+        - fullchain.pem
+
+
+- name: activation ssl
+  when:
+    - certificats_dossier_status.failed == false
+    - certificats_fichiers_status.failed == false
+  block:
+    - name: 'Activation site {{application}}-ssl'
+      ansible.builtin.command:
+        cmd: "a2ensite {{application}}..."
+      register: a2ensite_result
+      changed_when: a2ensite_result.stdout is not regex(... already enabled")
+      notify:
+      - service_apache2_reload
+
+    - name: Activation module SSL
+      ansible.builtin.command:
+        cmd: "a2enmod ssl"
+      register: a2enmod_result
+      changed_when: a2enmod_result.stdout is not regex("ssl already enabled")
+      notify:
+      - service_apache2_reload

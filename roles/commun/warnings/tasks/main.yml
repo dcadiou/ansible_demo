@@ -1,0 +1,63 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Affiche tous les avertissements collectés pendant l'exécution
+- name: compte le nombre d'avertissements
+  ansible.builtin.set_fact:
+    warnings_exists: "{{
+      true if ((warnings is defined) and
+      ((warnings.instances | length | int) > 0))
+      else false}}"
+
+- name: affichage absence avertissements
+  ansible.builtin.debug:
+    msg: "Aucun avertissement enregistrés lors de cette exécution du playbook."
+  when: warnings_exists == false
+
+- name: affichage des avertissements si il y en a
+  when: warnings_exists == true # s'il y a des avertissements
+  block:
+
+    - name: assemble liste avertissements
+      vars:
+        instances: "{{warnings.instances | selectattr('type', '==', type.nom) | list}}"
+        # Liste (`| list`) des avertissements (`warnings.instances`)
+        # dont l'attribut type est égal (`selectattr('type', '==', ...`)
+        # au nom du type actuellement parcouru dans la `loop` (`type.nom`).
+        # Autrement dit, les avertissements du type parcouru.
+        warning: # liste des chaines pour construire le chapitre sur les avertissements du type parcouru
+          - "==========================================================="
+          - "   {{type.nom}} :"
+          - "{{type.description}}"
+          - "Concerne"
+          - "{{instances | map(attribute='nom') | list}}"
+          # La liste (`| list`) des éléments concernés est extraite
+          # de l'attribut nom (`| map(attribute='nom')`)
+          # de chaque avertissements de la liste (`instances`) construite ci-avant
+          - ""
+      ansible.builtin.set_fact:
+        warnings_txt: "{{ warnings_txt + warning }}" # fusion de la liste des chaines existentes
+          # avec celles du nouveau chapitre/type.
+      loop: "{{warnings.types}}" # parcours de tous les types d'avertissements
+      loop_control:
+        loop_var: type # variable qui accueille Le type actuellement parcouru
+
+    - name: affichage des avertissements
+      ansible.builtin.debug:
+        msg: "{{warnings_txt}}"
+
+    - name: attente validation utilisateur pour continuer
+      ansible.builtin.pause:
+        prompt: "([Entrée] pour continuer)"

@@ -1,0 +1,68 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: initialisation de la BD et de l'utilisateur standard # nécessaire, voir ...
+  ansible.builtin.import_tasks:
+    file: ../roles/moodle/bd/restauration/tasks/init.yml
+
+- name: la sauvegarde existe
+  ansible.builtin.stat:
+    path: '{{chemin_sauvegarde}}'
+    follow: true # suit les liens symbolique si besoin
+    get_checksum: false # réduit considérablement le temps d'exécution sur des gros fichiers sql
+  register: fichier_sql
+  failed_when: fichier_sql.stat.exists == false
+
+- name: restauration de la BD (asynchrone)
+  ansible.builtin.shell:
+    cmd: "mysql -hlocalhost -u... {{nom_bd}} -e \"source {{chemin_sauvegarde}}\" > /tmp/restauration_{{nom_bd}}.log 2>&1;"
+  become: true # pour bénéficier de l'authentification unix_socket sans mot de passe
+  async: ... # on laisse 48h à la tache pour s'exécuter
+  poll: ... # on n'attends pas sa fin et on passe à la suite
+  register: restauration # pour usage ultérieur (surveillance tache encore en cours)
+
+- name: affiche l'id de la tache de restauration
+  ansible.builtin.debug:
+    msg: "Tache de restauration démarré sous l'id {{ restauration.ansible_job_id }}"
+
+- name: pause # le temps que la restauration en cours créer la BD
+  ansible.builtin.pause:
+    seconds: ...
+
+- name: controle de la restauration en cours # nécessaire, voir https://git.exemple.fr/cadiou/moodle-docker/-/issues/56
+  ansible.builtin.command:
+    cmd: "mysql -hlocalhost -u... {{nom_bd}} -e \"show processlist\\G\""
+  register: result
+  until: result.stdout_lines | map('lower') | select('search', 'info. insert into') | list | length > 0
+  retries: ...
+  delay: ... # execute cette tache jusqu'a ce que la condition dans until soit vraie
+    # (que la sortie standard contienne au moins une ligne avec '...insert into')
+    # 5 tentatives, avec 1 seconde entre chaque
+    # Sera en échec si aucune des tentatives ne trouve vrai
+
+- name: Verifie que la tache de restauration n'est pas déjà finie # ce qui serait anormale, si tôt
+  ansible.builtin.async_status:
+    jid: "{{ restauration.ansible_job_id }}"
+  register: job_result
+  failed_when: job_result.finished == 1 # ne devrait pas être finit
+
+- name: Message final
+  ansible.builtin.debug:
+    msg: "La restauration de la BD a été lancé avec succès.
+      Elle continue de s'exécuter à l'arrêt de ce playbook.
+      Pour contrôler la fin de cette restauration,
+      regarder manuellement sur le serveur cible, {{ansible_host}},
+      les processus (`ps auxf`) et/ou
+      la liste des tables en base (`mysql -uuser... -h{{db_conn.host}} {{nom_bd}} -e 'show tables;'`)"

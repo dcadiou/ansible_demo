@@ -1,0 +1,41 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: service_php_reload
+  ansible.builtin.service:
+    name: php{{php_version}}-fpm
+    state: reloaded
+
+- name: check_php_xdebug_actif
+  ansible.builtin.command:
+    cmd: php -m
+  register: modules_php
+  failed_when: expected_module not in modules_php.stdout_lines
+  changed_when: false # forcée car cette tache ne fait que lire
+  vars:
+    expected_module: '{{"xdebug"}}'
+  tags:
+    - check
+
+- name: check_php_xdebug_inactif
+  ansible.builtin.command:
+    cmd: php -m
+  register: modules_php
+  failed_when: expected_module in modules_php.stdout_lines
+  changed_when: false # forcée car cette tache ne fait que lire
+  vars:
+    expected_module: '{{"xdebug"}}'
+  tags:
+    - check

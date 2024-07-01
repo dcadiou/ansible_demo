@@ -1,0 +1,86 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: initialisation des donnees de recherche de compatibilité
+  set_fact:
+    plugins_incompatibles: []
+    plugins_installed: []
+    short_release: "{{ moodle.release | regex_search('[0-9]{1}\\.[0-9]{1,2}') }}"
+
+- name: Ajout des plugins communs
+  vars:
+    - chemin: "{{ plugin.path | regex_replace('^/', '') }}" # suppression d'un eventuel '/' au debut
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/sources/depot/plugins/tasks/ajout_plugin.yml
+  loop: "{{hostvars[inventory_hostname].sous_modules | default([], true) | selectattr('plateformes', 'undefined') | list}}"
+    # loop sur liste des sous modules dont l'attribut 'plateformes' n'existe pas
+  loop_control:
+    loop_var: plugin # nom de la variable qui contient chaque objet parcouru
+  when: plateforme_cible is not defined
+
+
+- name: Ajout des plugins specifiques
+  vars:
+    - chemin: "{{ plugin.path | regex_replace('^/', '') }}" # suppression d'un eventuel '/' au debut
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/sources/depot/plugins/tasks/ajout_plugin.yml
+  loop: "{{hostvars[inventory_hostname].sous_modules | default([], true)
+    | selectattr('plateformes', 'defined')
+    | selectattr('plateformes', 'contains', plateforme_cible) | list}}"
+    # loop sur liste des sous modules dont l'attribut 'plateformes' existe
+    # et contient la plateforme voulue
+  loop_control:
+    loop_var: plugin # nom de la variable qui contient chaque objet parcouru
+  when: plateforme_cible is defined
+
+- name: Controle la compatibilite des plugins
+  ansible.builtin.include_tasks:
+    file: ../../roles/moodle/sources/depot/plugins/tasks/check_plugins_compatibility.yml
+
+- name: affichage pb compatibilité si besoin
+  when:
+    - plugins_incompatibles is defined
+    - plugins_incompatibles | length > 0
+  # `plugins_incompatibles` est alimenté par les problèmes rencontrés
+  # dans ../ajout_plugin.yml
+  # et dans ../check_plugins_compatibility.yml
+  block:
+    - name: affiche les plugins avec des incompatibilites de version
+      ansible.builtin.debug:
+        msg: "{{ plugins_incompatibles | sort }}"
+
+    - name: interpelle l'utilisateur sur les incompatibilites de version
+      ansible.builtin.pause:
+        prompt: "Attention !!! les problèmes d'incompatibilités ci-dessus ont été détectés.
+          Si possible, corrigez les versions demandées dans 'plugins.yml',
+          puis relancez ce playbook (après un 'sudo git reset --hard --recurse-submodules').
+          Pour explorer le json et lever les doutes, utiliser la commande
+          `jq '.plugins | .[] | select(.component == nom_du_plugin_entre_double_quotes...)' /tmp/plugins.json`.
+          Tapez [entrée] pour continuer."
+      failed_when: true # Puisque cette tache est appelée, il y a matière à échec
+
+
+- name: detection changements
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git status'
+  register: status
+  changed_when: 0 # tache en lecture seule
+
+- name: validation des sous modules, si besoin
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'git commit -m "[ANSIBLE] Ajout des plugins (sous modules)"'
+  when: status.stdout is not search('(aucune modification ajoutée à la validation|la copie de travail est propre)') # s'il y a des changements dans le dépot du coeur

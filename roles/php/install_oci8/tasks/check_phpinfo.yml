@@ -1,0 +1,49 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# taches du handlers check_php_oci8_web
+
+- name: ajout page phpinfo
+  ansible.builtin.copy:
+    src: /...
+    dest: /...
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    mode: "{{dataroot_dir_mode}}"
+  run_once: true # a cause du montage NFS, ce fichier est commun. Executer sur un seul serveur suffit
+
+- name: Verifications presence ORACLE_HOME dans page phpinfo # le terme 'ORACLE_HOME' doit apparaitre plusieurs fois dans le phpinfo
+  ansible.builtin.uri:
+    url: 'https://localhost/ansible_phpinfo.php' # adresse locale, voir ...
+    return_content: true
+    validate_certs: false # le certicat cible le nom de la plateforme, pas localhost, donc il faut l'ignorer
+  register: page_phpinfo
+  failed_when: page_phpinfo.content | regex_findall('ORACLE_HOME', multiline=True, ignorecase=True) | length < 2
+  changed_when: false # forcée car cette tache ne fait que lire
+
+- name: Verification presence oci8 dans page phpinfo # le terme 'oci8' doit apparaitre plusieurs fois dans le phpinfo
+  ansible.builtin.uri:
+    url: 'https://localhost/ansible_phpinfo.php' # adresse locale, voir ...
+    return_content: true
+    validate_certs: false # le certicat cible le nom de la plateforme, pas localhost, donc il faut l'ignorer
+  register: page_phpinfo
+  failed_when: (page_phpinfo.content | regex_findall('oci8', multiline=True, ignorecase=True) | length) < 10
+  changed_when: false # forcée car cette tache ne fait que lire
+
+- name: suppression page phpinfo # suppression après usage
+  ansible.builtin.file:
+    path: /...
+    state: absent
+  run_once: true # a cause du montage NFS, ce fichier est commun. Executer sur un seul serveur suffit

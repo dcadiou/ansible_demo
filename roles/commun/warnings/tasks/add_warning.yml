@@ -1,0 +1,98 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Ajoute un avertissement à la liste des avertissements
+# déjà enregistrés dans les faits du playbook (`warnings`).
+#
+# warnings est ainsi composé
+#   types:
+#     - nom: # nom du type d'avertissement
+#       description: # description et explications de ce type d'avertissement
+#     - ...
+#   instances:
+#     - type: # référence (son nom dans l'attribut types décrit ci-dessus) à un type d'avertissement donné
+#       nom: # nom de l'élément concerné par cet avertissement
+#     - ...
+#
+# Chaque avertissement doit être passé sous forme d'une variable composée comme suit,
+# un dictionnaire nommé 'warning', contenant
+#
+# warning:
+#   type: # definir un type nommé d'événement
+#   description: # decrire suffisemment abondamment ce type d'événement pour que
+#                # l'utilisateur le comprenne et sache quelle décision prendre ou envisager
+#   instance: # le nom de l'élément concerné par l'erreur (fichier, plugin, patch ou autres),
+#             # tel qu'il sera présenté à l'utilisateur pour qu'il l'identifie
+#
+# Exemple d'usage
+# - name: enregistre un avertissement si dossier sous module deja utilisé
+#   vars:
+#     warning:
+#       type: "Sous-module Git reutilisé"
+#       description: "Git a déja enregistré ce chemin pour un sous-module dans une autre branche
+#         et va le réutiliser (c'est-à-dire conserver l'URL initiale du dépôt associé).
+#         Si cela ne vous convient pas, voir https://git.exemple.fr/moodle/moodle_admin/-/issues/40."
+#       instance: "{{plugin.path}}"
+#   ansible.builtin.include_tasks:
+#     file: ../roles/commun/warnings/tasks/add_warning.yml
+#   when: result.stdout is search('Réactivation du répertoire git local pour le sous-module')
+
+- name: initialisation avertissements si besoin
+  ansible.builtin.set_fact:
+    warnings: # Les avertissements collectés
+      types: [] # la liste de tous les types d'avertissement recensés
+      instances: [] # la liste des avertissements recensés
+    warnings_txt: [] # Le texte qui sera finalement affiché
+  when: warnings is not defined
+
+
+- name: ajoute un type d avertissement si besoin
+  vars:
+    type: # une liste ne contenant que le nouveau type
+      - nom: "{{warning.type}}"
+        description: "{{warning.description}}"
+    types: "{{warnings.types + type}}" # fusion des 2 listes (les existants + le nouveau)
+    instances: "{{warnings.instances}}" # les instances d'avertissement existentes
+  ansible.builtin.set_fact:
+    warnings: # reconstruction de la liste d'avertissements à partir des variables ci-dessus
+      types: "{{types}}"
+      instances: "{{instances}}"
+  when: warnings.types | selectattr('nom', '==', warning.type) | list | length == 0
+    # Extraction du nombre d'éléments (`| length`)
+    # dans la liste (`| list`) des types d'avertissement `warnings.types`,
+    # dont l'attribut nom est égal (`selectattr('nom', '==', ...`)
+    # au type de l'avertissement courant, `warning.type`
+    # et exécution si ce nombre est à 0
+    # Autrement-dit ajout de ce type d'avertissement que s'il n'existe pas déjà
+
+
+- name: ajoute cette instance d avertissement
+  vars:
+    types: "{{warnings.types}}" # les types d'avertissement existents
+    instance: # une liste ne contenant que le nouvel avertissement
+      - type: "{{warning.type}}"
+        nom: "{{warning.instance}}"
+    instances: "{{warnings.instances + instance}}" # fusion des 2 listes (les existants + le nouveau)
+  ansible.builtin.set_fact:
+    warnings: # reconstruction de la liste d'avertissements à partir des variables ci-dessus
+      types: "{{types}}"
+      instances: "{{instances}}"
+  when: warnings.instances | selectattr('nom', '==', warning.instance) | list | length == 0
+    # Extraction du nombre d'éléments (`| length`)
+    # dans la liste (`| list`) des avertissements `warnings.instances`,
+    # dont l'attribut nom est égal (`selectattr('nom', '==', ...`)
+    # au nom de l'avertissement courant, `warning.instance`
+    # et exécution si ce nombre est à 0
+    # Autrement-dit ajout de cet avertissement que s'il n'existe pas déjà

@@ -1,0 +1,45 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- ansible.builtin.pause:
+    prompt: "Création/remplacement de la BD {{db_conn.bd}} sur {{db_conn.host}} ?
+      [Entrée] pour ignorer, [ctrl]+[c] pour interrompre."
+
+- name: check utilisateur standard
+  ansible.builtin.command:
+    cmd: "mysql --batch -hlocalhost -u... -e \"
+      SELECT count(*) AS nb
+      FROM mysql.user
+      WHERE user = '{{db_conn.user}}'
+        AND host = '{{db_conn.host}}';\""
+  register: result # retourne 'nb\n0' si absent
+
+- name: creation de l'utilisateur standard # nécessaire, voir ...
+  no_log: true # pour ne pas exposer des donnees sensibles
+  ansible.builtin.command:
+    cmd: "mysql -hlocalhost -u... -e \"create user '{{db_conn.user}}'@'{{db_conn.host}}' identified by '{{db_conn.pw}}';\""
+  when: result.stdout is search('0') # tache exécutée que si la requête précendente a retourné 0
+
+- name: suppression eventuelle preexistante database
+  ansible.builtin.command:
+    cmd: "mysql -hlocalhost -u... -e \"drop database if exists `{{nom_bd}}`;\""
+
+- name: creation database
+  ansible.builtin.command:
+    cmd: "mysql -hlocalhost -u... -e \"create database `{{nom_bd}}`;\""
+
+- name: attribution de droits a l'utilisateur standard # nécessaire, voir ...
+  ansible.builtin.command:
+    cmd: "mysql -hlocalhost -u... {{nom_bd}} -e \"grant ... * to ...;\""

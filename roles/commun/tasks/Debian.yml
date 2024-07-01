@@ -1,0 +1,57 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+- name: apt update
+  apt:
+    update_cache: yes # run un 'apt update'
+    cache_valid_time: .... # uniquement si le dernier a plus de 12h
+    # update_cache_retries: 1 # necessite ansible version >= 2.10
+  ignore_errors: yes
+
+- name: Installer les paquetages de base
+  apt:
+    name:
+      - curl
+      - python3 # souvent déjà présent
+      #...
+     state: present
+    install_recommends: false
+
+- name: python dans le PATH
+  ansible.builtin.file:
+    path: /usr/bin/python
+    src: /usr/bin/python3
+    state: link
+
+- name: groupe d'utilisateurs
+  ansible.builtin.group:
+    name: "{{team_group_name}}"
+    gid: "{{team_group_id}}"
+    state: present
+
+- name: Alias pour tous les utilisateurs
+  block:
+    - name: dossier de configuration environnement
+      ansible.builtin.file:
+        path: /etc/profile.d/
+        state: directory
+
+    - name: alias au niveau système
+      ansible.builtin.lineinfile:
+        path: /etc/profile.d/10-aliases.sh
+        regexp: '^ll'
+        line: 'alias ll="ls -la"'
+        create: true # pour créer le fichier s'il est absent

@@ -1,0 +1,24 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Purge des caches applicatifs Moodle
+
+- name: lancer purge du cache sur tous les serveurs
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/purge_caches.php'
+  run_once: false # on force la purge sur tous les serveurs, pour atteindre les caches locaux
+  throttle: 1 # on force une exécution sériée (1 host à la fois) pour éviter les conflits sur les caches communs
+  register: result_purge_cache

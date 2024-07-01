@@ -1,0 +1,42 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: Installer le paquet git
+  apt:
+    name:
+      - git
+
+- name: Configuration git au niveau système
+  ansible.builtin.template:
+     src: system_gitconfig.j2
+     dest: /etc/gitconfig
+
+- name: Configuration git au niveau global (utilisateur courant)
+  ansible.builtin.template:
+     src: global_gitconfig.j2
+     dest: ~/.gitconfig
+
+- name: ajout du transfert d'agent SSH pour sudo
+  # Cela permet, si besoin, de lancer des commandes git précédées de `sudo`
+  # tout en bénéficiant du transfert d'agent SSH de l'utilisateur
+  # connecté au serveur (pas root), donc de fonctionner avec des "remote"
+  # qui possède une URL `git://` (comme git.exemple.fr) qui exige une clé SSH.
+  # Voir https://webcemu.unicaen.fr/dokuwiki/doku.php?id=cemu:outils:logiciel:git
+  ansible.builtin.copy:
+    src: sudoer_git
+    dest: /etc/sudoers.d/git
+    owner: ...
+    group: ...
+    mode: ...

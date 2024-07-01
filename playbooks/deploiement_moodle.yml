@@ -1,0 +1,220 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Playbook de deploiement d'un Moodle
+# à la version définie dans le fichier d'inventaire
+# Ce qui inclut, entre autres
+# - la mise à jour du dépôt local de ces sources
+# - la mise à jour de la BD par Moodle lui-même
+# - l'application des configurations applicatives
+#
+# Ce playbook ne s'exécute que pour une plateforme à la fois,
+# donc ne pas oublier l'argument '-l'
+# pour limiter les hosts à ceux de la bonne plateforme (voir inventaire)
+#
+# Pour assurer le bon fonctionnement du playbook,
+# il est nécessaire de garantir au préalable que Moodle soit fonctionnel au niveau de l'hôte cible avant son exécution.
+#
+# Exemple d'utilisation
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l prelude
+  # <option pour la vault...> \
+  # playbooks/deploiement_moodle.yml
+#
+# Arguments optionnels à passer sous la forme
+#   --extra-vars '{"la variable":"sa valeur", }'
+
+# * "version_cible":..., pour ignorer la valeur définie dans l'inventaire pour le serveur cible
+#   et ainsi déployer une version particulière, notamment une branche préfixée.
+#
+# Autres arguments optionnels, à ajouter sous la forme
+#   "variables1":true, "variables2":true, etc
+# Le playbook test uniquement si ces variables sont définies,
+# donc NE PAS LES DEFINIR si elle ne sont pas nécessaires, plutôt que les définir à `false`.
+# * "skip_database_backup":true, pour neutraliser la sauvegarde préalable
+#     de la base de données de la plateforme.
+#     Cela suppose que le niveau de confiance sur le déploiement est très élevé
+#     et que la perte des dernières heures de travail des utilisateurs
+#     est potentiellement acceptable.
+# * "skip_dataroot_permission_correction":true, pour ne pas corriger les éventuelles anomalies
+#     de droits d'accès aux fichiers dans le dataroot.
+#     Cela suppose que l'on privilégie le risque d'avoir des fichiers inaccessibles
+#     dans le dataroot à celui d'avoir une opération de déploiement trop longue.
+# * "skip_deprecated_plugin":true, pour neutraliser la suppression des plugins obsolètes.
+#     Cela suppose d'être sur que les conserver ne posera pas de problème.
+# * "skip_config_definition":true, pour neutraliser l'application ou la ré-application
+#     des points de config définis dans le projet Ansible.
+#     Cela suppose que l'on est certain qu'aucun des points a été changé depuis
+#     la dernière opération de déploiement et qu'on privilégie le risque d'en oublier
+#     à celui d'un déploiement trop long.
+# * "skip_file_upload":true, pour neutraliser le téléversement des fichiers multimédias (long).
+#     Cela suppose que cela a déjà été fait et qu'il n'y a aucun changement concernant ces fichiers.
+
+- name: confirmation dexecution
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  tasks:
+    - ansible.builtin.pause:
+        prompt: "Demarrage deploiement Moodle sur {{ansible_host}},
+          {{ (\"restreinte a \" + ansible_limit) if ansible_limit is defined else '',}},
+          sur la branche/le tag '{{version_cible}}'
+          ([Entrée] pour continuer)"
+
+
+- name: verification existence serveur cible
+  hosts: serveurs_de_cron
+  ignore_unreachable: yes
+  tasks:
+    - name: affiche avertissement host si besoin
+      ansible.builtin.assert:
+        that: "{{ansible_facts | select('search', 'hostname') | list | length > 0}}"
+        success_msg: "OK"
+        fail_msg: "Si votre serveur cible est dans une infra dockerisée,
+          vérifier que ansible_host, \"{{ansible_host}}\",
+          est bien le nom du container docker concerné. Sinon, corrigez localement l'inventaire.
+          Voir https://git.exemple.fr/moodle/moodle_admin/-/issues/118"
+      ignore_errors: true
+
+
+- name: sauvegarde
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  vars:
+    - backup_file: "{{backup_dir}}/{{ '%Y-%m-%d' | strftime }}/sauvegarde_{{db_conn.bd}}_avt_maj.sql"
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/depot/info
+      vars:
+        - destination: "{{backup_file}}.md"
+      when: skip_database_backup is not defined
+
+    - role: roles/mariadb/sauvegarde
+      when: skip_database_backup is not defined
+
+
+- name: preparation dossier
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/droits_dossiers
+
+
+- name: fichier de configuration de Moodle si besoin # Au cas où le dépôt aurait été refait
+    # par exemple, lors d'un test local avec exécution préalable du playbook de préparation de dépôt
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/config
+
+
+- name: desactivation cron
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/config_cron/desactivate
+
+
+
+# Plateforme fermée à partir d'ici ---------------------------------------------
+
+
+- name: activation mode maintenance
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  vars:
+    - deep_maintenance:
+  roles:
+    - role: roles/moodle/applicatif/maintenance/activate
+
+
+- name: redemarrage de la BD pour maximiser la memoire disponible
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: bd_ecampus # pas faisable pour les autres plateformes qui se partagent un même serveur de BD
+  tasks:
+    - name: redemarrage du service de BD
+      ansible.builtin.service:
+        name: mariadb
+        state: restarted
+
+
+- name: deploiement du depot
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  vars:
+    - depot_cible: "{{depots.unicaen}}"
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/depot/init # init depot
+
+
+- name: fichier de configuration de Moodle
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/config
+
+
+- name: mise a jour moodle si besoin
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  vars:
+    - depot_cible: "{{depots.unicaen}}"
+    - nom_bd: "{{db_conn.bd}}"
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/applicatif/maj
+
+
+- name: rectification droits dossier
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  roles:
+    - role: roles/moodle/sources/droits_dossiers
+
+
+- name: application des configurations applicatives
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: true
+  roles:
+    - role: roles/moodle/applicatif/configuration
+      when: skip_config_definition is not defined
+
+
+- name: affiche les avertissements
+  hosts: serveurs_de_cron
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  run_once: true
+  roles:
+    - roles/commun/warnings
+
+
+- name: desactivation mode maintenance
+  gather_facts: false # car "facts" non utilisés actuellement
+  hosts: serveurs_de_cron
+  run_once: '{{moodle_sources_communes}}'
+  vars:
+    - deep_maintenance:
+  roles:
+    - role: roles/moodle/applicatif/maintenance/desactivate
+    - role: roles/moodle/config_cron/reactivate

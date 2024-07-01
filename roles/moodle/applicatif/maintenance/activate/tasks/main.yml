@@ -1,0 +1,39 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: demande confirmation mode maintenance
+  vars:
+    notice_deep: "Attention ! Dans ce contexte le mode maintenance s'accompagne de
+      la neutralisation de plusieurs données temporaires et processus associés
+      (caches, sessions, etc).
+      Certaines taches programmées, neutralisées pendant la période, sont à lancer manuellement après,
+      si la prochaine exécution programmée est jugée trop lointaine."
+  ansible.builtin.pause:
+    prompt: "Etes-vous prêt à activer le mode maintenance ?
+      {{ notice_deep if deep_maintenance is defined else '' }}
+      [Entrée] pour continuer, [ctrl]+[c] sinon."
+  register: confirmation_maintenance
+
+- name: activation mode maintenance
+  vars:
+    action: "{{ 'enable' if maintenance == true else 'disable' }}"
+  ansible.builtin.command:
+    chdir: '{{moodle_dir}}'
+    cmd: 'php admin/cli/maintenance.php --enable'
+
+- name: activation mode maintenance profond
+  ansible.builtin.import_tasks:
+    file: enter_deep_maintenance.yml
+  when: deep_maintenance is defined

@@ -1,0 +1,174 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: Installation libapache2-mod-shib
+  apt:
+    name:
+      - libapache2-mod-shib
+    state: present
+    install_recommends: true
+
+
+# Configuration service shib
+- name: sauvegarde des fichiers de conf initiaux
+  ansible.builtin.copy:
+    remote_src: true # copie de la machine distante vers la machine distante
+    src: /...
+    dest: /...
+    force: false # si le fichier destination existe déjà, pas de copie
+  loop:
+    - attribute-map.xml
+    - attribute-policy.xml
+    - protocols.xml
+    - security-policy.xml
+    - shibboleth2.xml
+    - native.logger
+    - shibd.logger
+
+- name: recupération clé du fournisseur de métadonnées de la fédération
+  ansible.builtin.get_url:
+    url: "https://metadata.federation.renater.fr/certs/{{shib_metadata_cert_name}}"
+    dest: /...
+
+- name: Configuration du fournisseur de service
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+
+- name: Configuration de la liste des attributs
+  ansible.builtin.template:
+    src: /...
+    dest: /...
+
+# `protocols.xml` et `security-policy.xml` restent les fichiers par défaut obtenus à l'install
+
+- name: rectification eventuelle des droits dossier shib
+  ansible.builtin.file:
+    path: /...
+    recurse: true
+    state: directory
+    owner: ...
+    group: ...
+
+
+# Certificats du fournisseur de service
+- name: recherche des certificats du fournisseur de service
+  ansible.builtin.stat:
+    path: /...
+  loop:
+    -  # private key
+    -  # public certificate
+  register: recherche_certificats
+
+- name: generation des certificats du fournisseur de service si besoin
+  ansible.builtin.command:
+    cmd: sudo shib-keygen -f
+  when: recherche_certificats.results | map(attribute='stat') | selectattr('exists', '==', true) | list | length < 2 # si moins de 2 fichiers existants
+
+
+# Service WAYF
+- name: definition localisation de l appli wayf
+  ansible.builtin.set_fact:
+    wayf_dir: '{{www_dir}}/.../wayf'
+
+- name: instanciation depot git wayf
+  ansible.builtin.git:
+    repo: https://gitlab.switch.ch/gip-renater/SWITCHwayf/
+    dest: "{{wayf_dir}}"
+    update: true
+    accept_hostkey: true #NOTE: 'accept_newhostkey' serait mieux mais requiert une version récente d'ansible_env # permet l'acceptation automatique de la clé du depôt distant la 1ere fois
+
+- name: recherche de la page principale du wayf
+  ansible.builtin.stat:
+    path: "{{wayf_dir}}/.../index.php"
+  register: recherche_accueil
+
+- name: renommage de la page principale du wayf si besoin
+  ansible.builtin.copy:
+    remote_src: true # depuis la machine controlée
+    src: "{{wayf_dir}}/.../WAYF"
+    dest: "{{wayf_dir}}/.../..."
+  when: recherche_accueil.stat.exists == false
+
+- name: modification de la css du wayf
+  ansible.builtin.copy:
+    remote_src: false # sources locales
+    src: ../files/custom-styles.css
+    dest: "{{wayf_dir}}/www/css/..."
+
+- name: personnalisation du contenu du wayf
+  vars:
+    filename: "{{ item | basename }}" # extraction du nom seul depuis le chemin complet
+  ansible.builtin.copy:
+    remote_src: false # sources locales
+    src: "../files/{{ filename }}"
+    dest: "{{wayf_dir}}/lib/{{ filename }}"
+  loop: "{{ lookup('ansible.builtin.fileglob', '../files/custom-*.php', wantlist=True) }}"
+  # Recherche (avec le plugin `fileglob`) la liste de tous les fichiers (leur chemin complet)
+  # qui correspond au pattern indiqué (2ieme argument de lookup())
+  # et transforme la liste (séparée par des `,`) en une "vraie" liste (avec le 3ieme arg `wantlist=True`).
+
+- name: depot des logos pour le wayf
+  ansible.builtin.copy:
+    remote_src: false # sources locales
+    src: "../files/{{ item }}"
+    dest: "{{wayf_dir}}/.../images/{{ item }}"
+  loop:
+    - logo_normand.jpg
+    - rouen.png
+    - unicaen.png
+
+- name: maj conf du wayf
+  ansible.builtin.template:
+    src: ../templates/config.php.j2
+    dest: "{{wayf_dir}}/etc/config.php"
+  notify:
+    - services_restart
+
+- name: maj conf du wayf fournisseurs d identite
+  ansible.builtin.template:
+    src: ../templates/IDProvider.conf.php.j2
+    dest: "{{wayf_dir}}/etc/IDProvider.conf.php"
+  notify:
+    - services_restart
+
+- name: rectification eventuelle des droits dossier wayf
+  ansible.builtin.file:
+    path: "{{wayf_dir}}"
+    recurse: true
+    state: directory
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    mode: "{{appli_dir_mode}}"
+
+
+# Adapatation config serveur web
+- name: complement conf apache2
+  ansible.builtin.blockinfile:
+    path: '/../{{application}}...'
+    insertbefore: ScriptAlias
+    marker: '# {mark} SHIBBOLETH, AJOUTE PAR ANSIBLE, NE PAS TOUCHER ICI'
+    block: "{{ lookup('ansible.builtin.template', '../templates/apache.cfg.j2', convert_data=true) }}"
+    state: present
+  notify:
+    - services_restart
+
+- name: Activation module shibboleth
+  ansible.builtin.command:
+    cmd: "a2enmod shib"
+  register: a2enmod_result
+  changed_when: a2enmod_result.stdout is not regex("shib already enabled")
+  notify:
+    - services_restart

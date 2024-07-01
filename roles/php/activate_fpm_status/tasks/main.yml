@@ -1,0 +1,51 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Configuration page status php-FPM
+
+# Si désactivation
+- name: Désactivation page status php-FPM
+  when: status_fpm == false
+  block:
+    - name: Désactivation page status php-FPM dans la conf de php
+      ansible.builtin.lineinfile:
+        path: /...
+        line: ';pm.status_path = /fpm-status' # la ligne est commentée
+        regexp : 'status_path ='
+        state: present
+      notify:
+        - service_php_reload
+
+    - name: Suppression section statut fpm à la conf d'apache2
+      ansible.builtin.blockinfile:
+        path: /...
+        marker: '# {mark} ANSIBLE MANAGED BLOCK - STATUS'
+        block: ''
+      notify:
+        - service_apache2_reload
+
+
+# Si activation
+- name: Activation page status php-FPM
+  when: status_fpm == true
+  block:
+    - name: Activation page status php-FPM dans la conf de php
+      ansible.builtin.lineinfile:
+        path: /...
+        line: 'pm.status_path = /fpm-status' # la ligne est décommentée
+        regexp : 'status_path ='
+        state: present
+      notify:
+        - service_php_reload

@@ -1,0 +1,124 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# Playbook à utiliser pendant les phases de modifications des configs Moodle
+# pour vérifier la bonne lisibilité des configs, notamment
+# * le bon parcours de tous les fichiers de confs
+# * l'absence d'erreur de lecture
+# * etc
+#
+# Exemple d'usage'
+# ansible-playbook \
+  # -i inventories/serveurs_pp.yml \
+  # -l ecampus \
+  # <options pour vault...> \
+  # playbooks/read_moodle_configs.yml
+  #
+# Pour ne voir que les points de config qui diffèrent des valeurs par défaut
+# --extra-vars '{"skip_default":"true"}'
+#
+# Pour neutraliser la vérification des fichiers multimédias (long)
+# si cela a déjà été fait par exemple.
+# --extra-vars '{"skip_file_upload":"true"}'
+#
+# Pour tester les configs pour différentes plateformes, changer la valeur de l'argument `-l`
+
+- name: test lecture config
+  hosts: moodle
+  gather_facts: false # collecte auto des "facts" non nécessaire ici
+  run_once: true # exécuté qu'une fois même s'il y a plusieurs serveurs dans le groupe
+  vars:
+    - skip_default: false # Valeur si non spécifiée lors de l'appel du playbook
+  tasks:
+
+    - name: affichage plateforme
+      ansible.builtin.debug:
+        msg: "Pour la plateforme {{ plateforme }}"
+
+    - name: initialisation
+      ansible.builtin.set_fact:
+        cfgs_print: []
+        multimedia_print: []
+
+
+    - name: lecture des variables
+      ansible.builtin.import_tasks:
+        file: ../roles/moodle/applicatif/configuration/tasks/lecture_variables.yml
+
+
+    - name: controle des variables
+      ansible.builtin.import_tasks:
+        file: ../roles/moodle/applicatif/configuration/tasks/controle_variables.yml
+
+
+    - name: preparation affichage des points de configs # pour un affichage plus compacte
+      vars:
+        configs_subdir: "{{ 'plugins/' if item.plugin is defined else '' }}"
+        external_value_file: "{{ ('../inventories/group_vars/moodle/' + configs_subdir + 'configs/' + item.external_value) if item.external_value is defined else '' }}"
+        is_template: "{{ (external_value_file | splitext | last) == '.j2'}}"
+        value_from_file: "{{ lookup('ansible.builtin.template', external_value_file, convert_data=is_template) if item.external_value is defined else '' }}"
+      ansible.builtin.set_fact:
+        cfgs_print: "{{ cfgs_print + [ ((
+          item.plugin if item.plugin is defined else '',
+          '|',
+          item.name,
+          '=',
+          '-sera ignoré par Ansible-' if ((item.to_be_ignored is defined) and (item.to_be_ignored == true)) else (
+            (
+              '          ',
+              item.value if item.value is defined else '',
+              value_from_file if item.external_value is defined else '',
+              '          (' if ((item.value is defined) or (item.external_value is defined)) else '(',
+              item.default if item.default is defined else '',
+              ' par défaut)' if ((item.value is defined) or (item.external_value is defined)) else ' = valeur par défaut)'
+            ) | join('')
+          )
+          ) | join(' ')) ] }}"
+      loop: "{{ cfgs if skip_default == false else cfgs_used}}"
+      loop_control:
+        label: "{{item.name}}"
+
+
+    - name: preparation affichage des fichiers multimedia # pour un affichage plus compacte
+      ansible.builtin.set_fact:
+        multimedia_print: "{{ multimedia_print + [ (
+          item.filepath,
+          item.filename,
+          ' (contextid=',
+          item.contextid,
+          ', ',
+          item.component,
+          ' | ',
+          item.filearea,
+          ')'
+          ) | join('')
+          ] }}"
+      loop: "{{ multimedia_files }}"
+      loop_control:
+        label: "{{item.filename}}"
+
+
+    - name: affichage des points de config
+      ansible.builtin.debug:
+        msg: "{{cfgs_print}}"
+
+
+    - name: affichage des fichiers multimedias
+      ansible.builtin.debug:
+        msg: "{{multimedia_print}}"
+
+    - name: affichage plateforme
+      ansible.builtin.debug:
+        msg: "C'était pour la plateforme {{ plateforme }}"

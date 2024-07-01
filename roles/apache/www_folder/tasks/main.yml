@@ -1,0 +1,36 @@
+# Copyright (C) 2024 Cadiou Didier <didier.cadiou@unicaen.fr>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+- name: 'groupe {{application}}'
+  ansible.builtin.group:
+    name: '{{application}}'
+    state: present
+
+- name: Dossiers des applicatifs
+  ansible.builtin.file:
+    state: directory # creer les dossiers ancetres s'ils manquent
+    path: '{{ www_dir }}/.../'
+    owner: "{{dataroot_dir_owner}}"
+    group: "{{dataroot_dir_group}}"
+    recurse: false
+
+- name: "Dossiers de l'applicatif {{application}}"
+  ansible.builtin.file:
+    state: directory
+    path: '{{ www_dir }}/.../{{application}}'
+    owner: "{{appli_dir_owner}}"
+    group: "{{appli_dir_group}}"
+    recurse: false # le contenu est sous la responsabilité du déploiement de l'application
+      # ce qui n'est pas l'objet ici
